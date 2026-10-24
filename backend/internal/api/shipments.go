@@ -523,7 +523,7 @@ func (s *Server) driverShipments(w http.ResponseWriter, r *http.Request) error {
 	p := principal(r.Context())
 	rows, err := s.pool.Query(r.Context(), shipmentSelect+`
 		WHERE v.driver_id = $1 AND (sh.status IN ('loading', 'in_transit') OR sh.delivered_at > now() - interval '2 days')
-		ORDER BY sh.planned_departure DESC LIMIT 50`, p.UserID)
+		ORDER BY (sh.status = 'in_transit') DESC, sh.planned_departure DESC LIMIT 50`, p.UserID)
 	if err != nil {
 		return err
 	}

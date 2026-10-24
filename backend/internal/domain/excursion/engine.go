@@ -70,8 +70,8 @@ func (s Segment) Duration() time.Duration { return s.End.Sub(s.Start) }
 
 // Gap is a stretch without readings longer than Rules.MaxGap.
 type Gap struct {
-	Start time.Time
-	End   time.Time
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end"`
 }
 
 // Rule names match the alarm_rule enum in the database.
@@ -85,8 +85,8 @@ const (
 
 // Breach is a violated rule and when it was first violated.
 type Breach struct {
-	Rule string
-	At   time.Time
+	Rule string    `json:"rule"`
+	At   time.Time `json:"at"`
 }
 
 // Result of an evaluation.

@@ -618,7 +618,7 @@ func (r *runner) t1Excursion() {
 			ex := m(w["excursion"])
 			hasCum := false
 			for _, b := range arr(ex["breaches"]) {
-				if m(b)["Rule"] == "cumulative" {
+				if m(b)["rule"] == "cumulative" {
 					hasCum = true
 				}
 			}

@@ -888,7 +888,7 @@ func (s *seeder) readings(pool *pgxpool.Pool) error {
 	if _, err := pool.Exec(s.ctx, `
 		INSERT INTO alarms (dedup_key, sensor_id, location_id, rule, peak_cc, excursion_s, message, opened_at, last_seen_at)
 		SELECT 'seed:hot-room:' || s.id, s.id, l.id, 'limit_high', 1150, 3000,
-		       s.code || ': door left open, about 11 °C for 50 minutes', $2::timestamptz, $2::timestamptz + interval '50 minutes'
+		       s.code || ': kapı açık kalmış, 50 dk boyunca yaklaşık 11 °C', $2::timestamptz, $2::timestamptz + interval '50 minutes'
 		FROM sensors s JOIN locations l ON l.id = s.location_id WHERE l.code = $1 ORDER BY s.id LIMIT 1`,
 		hotRoom, s.now.Add(-6*time.Hour)); err != nil {
 		return err

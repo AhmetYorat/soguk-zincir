@@ -233,8 +233,22 @@ func (s *sim) tick(ctx context.Context, now time.Time) {
 	_ = os.WriteFile(s.health, []byte(time.Now().Format(time.RFC3339)), 0o644)
 }
 
+// nextSeq returns max(previous+1, now in µs): strictly increasing, and never
+// behind wall-clock time, so a restarted simulator (or another client that
+// used the current time as its sequence) does not get its messages rejected
+// as replays.
+func (s *sim) nextSeq() uint64 {
+	for {
+		prev := s.seq.Load()
+		next := max(prev+1, uint64(time.Now().UnixMicro()))
+		if s.seq.CompareAndSwap(prev, next) {
+			return next
+		}
+	}
+}
+
 func (s *sim) signedRequest(ctx context.Context, p *probe, body []byte) (*http.Request, error) {
-	seq := s.seq.Add(1)
+	seq := s.nextSeq()
 	ts := time.Now().UnixMilli()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.api+"/api/v1/ingest/readings", bytes.NewReader(body))
 	if err != nil {

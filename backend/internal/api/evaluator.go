@@ -195,7 +195,7 @@ func (e *Evaluator) SensorPass(ctx context.Context) error {
 		if len(sr.rs) == 0 {
 			a := base
 			a.key, a.rule = key(excursion.RuleGap), excursion.RuleGap
-			a.message = fmt.Sprintf("%s: no readings for more than %s", sr.code, maxWindow)
+			a.message = fmt.Sprintf("%s: %s boyunca hiç ölçüm yok", sr.code, dur(maxWindow))
 			out = append(out, a)
 			continue
 		}
@@ -223,7 +223,7 @@ func (e *Evaluator) SensorPass(ctx context.Context) error {
 			a := base
 			a.key, a.rule, a.peakCC = key(excursion.RuleLimitHigh), excursion.RuleLimitHigh, &peak
 			a.excursionS = int(res.HighDuration.Seconds())
-			a.message = fmt.Sprintf("%s: %.2f °C above the %.1f °C limit for %s", sr.code, float64(peak)/100, float64(rules.MaxCC)/100, p.Name)
+			a.message = fmt.Sprintf("%s: %.2f °C — %s için üst limit %.1f °C aşıldı", sr.code, float64(peak)/100, p.Name, float64(rules.MaxCC)/100)
 			out = append(out, a)
 		}
 		if low != nil {
@@ -231,14 +231,14 @@ func (e *Evaluator) SensorPass(ctx context.Context) error {
 			a := base
 			a.key, a.rule, a.peakCC = key(excursion.RuleLimitLow), excursion.RuleLimitLow, &v
 			a.excursionS = int(res.LowDuration.Seconds())
-			a.message = fmt.Sprintf("%s: %.2f °C below the %.1f °C limit for %s", sr.code, float64(v)/100, float64(rules.MinCC)/100, p.Name)
+			a.message = fmt.Sprintf("%s: %.2f °C — %s için alt limit %.1f °C'nin altında", sr.code, float64(v)/100, p.Name, float64(rules.MinCC)/100)
 			out = append(out, a)
 		}
 		if now.Sub(last.TS) > rules.MaxGap {
 			a := base
 			a.key, a.rule = key(excursion.RuleGap), excursion.RuleGap
 			a.excursionS = int(now.Sub(last.TS).Seconds())
-			a.message = fmt.Sprintf("%s: silent since %s", sr.code, last.TS.UTC().Format(time.RFC3339))
+			a.message = fmt.Sprintf("%s: %s süredir ölçüm gelmiyor (son: %s)", sr.code, dur(now.Sub(last.TS)), last.TS.UTC().Format("15:04:05 UTC"))
 			out = append(out, a)
 		}
 		peak := res.PeakCC
@@ -246,8 +246,8 @@ func (e *Evaluator) SensorPass(ctx context.Context) error {
 			a := base
 			a.key, a.rule, a.peakCC = key(excursion.RuleWindow), excursion.RuleWindow, &peak
 			a.excursionS = int(res.MaxWindowExcursion.Seconds())
-			a.message = fmt.Sprintf("%s: %s out of range within %s (allowed %s) for %s", sr.code,
-				res.MaxWindowExcursion.Round(time.Second), rules.Window, rules.WindowMax, p.Name)
+			a.message = fmt.Sprintf("%s: %s içinde %s limit dışında (izin %s) — %s", sr.code,
+				dur(rules.Window), dur(res.MaxWindowExcursion), dur(rules.WindowMax), p.Name)
 			out = append(out, a)
 		}
 	}
@@ -296,8 +296,8 @@ func (e *Evaluator) evaluateOneLot(ctx context.Context, lotID int64) error {
 		out = append(out, alarmUpsert{
 			key: fmt.Sprintf("lot:%d:cumulative", lotID), lotID: &lot, productID: ev.Product.ID, rule: excursion.RuleCumulative,
 			excursionS: int(w.result.ExcursionDuration.Seconds()), at: ev.EvaluatedAt,
-			message: fmt.Sprintf("lot %s (%s): %s outside limits in total, allowed %s", ev.LotCode, w.UnitCode,
-				w.result.ExcursionDuration.Round(time.Second), time.Duration(ev.Product.MaxCumulativeExcursionS)*time.Second),
+			message: fmt.Sprintf("Parti %s (%s): toplam %s limit dışında, izin verilen %s — parti beklemeye alındı", ev.LotCode, w.UnitCode,
+				dur(w.result.ExcursionDuration), dur(time.Duration(ev.Product.MaxCumulativeExcursionS)*time.Second)),
 		})
 		// goods with a broken cold chain must not ship before a quality decision
 		if _, err := e.s.pool.Exec(ctx, `UPDATE lots SET status = 'on_hold' WHERE id = $1 AND status = 'released'`, lotID); err != nil {
@@ -307,7 +307,7 @@ func (e *Evaluator) evaluateOneLot(ctx context.Context, lotID int64) error {
 	if w.estimate.Expired {
 		out = append(out, alarmUpsert{
 			key: fmt.Sprintf("lot:%d:shelf_life", lotID), lotID: &lot, productID: ev.Product.ID, rule: "shelf_life",
-			at: ev.EvaluatedAt, message: fmt.Sprintf("lot %s has no shelf life left (%.1f h)", ev.LotCode, w.estimate.Remaining.Hours()),
+			at: ev.EvaluatedAt, message: fmt.Sprintf("Parti %s raf ömrünü doldurdu (kalan %.1f sa)", ev.LotCode, w.estimate.Remaining.Hours()),
 		})
 	}
 	return e.upsert(ctx, out)
@@ -356,4 +356,20 @@ func prefixed(alias, cols string) string {
 		parts[i] = alias + "." + strings.TrimSpace(p)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// dur formats a duration for alarm messages: "1 sa 5 dk", "8 dk 26 sn".
+func dur(d time.Duration) string {
+	d = d.Round(time.Second)
+	h, m, sec := int(d.Hours()), int(d.Minutes())%60, int(d.Seconds())%60
+	switch {
+	case h > 0:
+		return fmt.Sprintf("%d sa %d dk", h, m)
+	case m > 0 && sec > 0:
+		return fmt.Sprintf("%d dk %d sn", m, sec)
+	case m > 0:
+		return fmt.Sprintf("%d dk", m)
+	default:
+		return fmt.Sprintf("%d sn", sec)
+	}
 }
