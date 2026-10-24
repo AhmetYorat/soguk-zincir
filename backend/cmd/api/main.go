@@ -21,13 +21,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/api"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/config"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/db"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/domain/devicesig"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/ingest"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/jobs"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/seed"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/api"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/config"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/db"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/domain/devicesig"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/ingest"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/jobs"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/seed"
 )
 
 func main() {

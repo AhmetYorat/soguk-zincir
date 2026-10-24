@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/domain/excursion"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/domain/excursion"
 )
 
 var produced = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)

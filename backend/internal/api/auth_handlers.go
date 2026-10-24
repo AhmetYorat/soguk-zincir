@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/auth"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/httpx"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/auth"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/httpx"
 )
 
 type tokenResponse struct {

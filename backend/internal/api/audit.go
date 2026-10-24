@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/httpx"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/httpx"
 )
 
 // audit appends to the audit log inside the caller's transaction, so the

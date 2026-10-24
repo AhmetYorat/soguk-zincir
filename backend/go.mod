@@ -1,4 +1,4 @@
-module github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend
+module github.com/AhmetYorat/soguk-zincir/backend
 
 go 1.27.3
 

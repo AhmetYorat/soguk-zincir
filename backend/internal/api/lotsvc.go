@@ -7,9 +7,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/domain/excursion"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/domain/shelflife"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/httpx"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/domain/excursion"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/domain/shelflife"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/httpx"
 )
 
 // Product mirrors the products table.

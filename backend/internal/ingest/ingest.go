@@ -21,7 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/domain/devicesig"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/domain/devicesig"
 )
 
 // Reading is a validated measurement waiting to be written.

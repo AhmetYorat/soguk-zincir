@@ -17,7 +17,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/domain/excursion"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/domain/excursion"
 )
 
 // Factor returns how many times faster than nominal the product ages at tempC.

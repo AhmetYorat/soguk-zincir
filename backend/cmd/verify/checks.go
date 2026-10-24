@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/domain/devicesig"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/domain/devicesig"
 )
 
 // ---- health, authentication, authorisation ----

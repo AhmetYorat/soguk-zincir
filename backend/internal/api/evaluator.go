@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/domain/excursion"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/domain/excursion"
 )
 
 // Evaluator turns readings into alarms.

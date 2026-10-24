@@ -15,12 +15,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/auth"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/config"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/db"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/domain/devicesig"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/httpx"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/ingest"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/auth"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/config"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/db"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/domain/devicesig"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/httpx"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/ingest"
 )
 
 // Querier is satisfied by both *pgxpool.Pool and pgx.Tx.

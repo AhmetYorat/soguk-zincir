@@ -12,10 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/auth"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/db"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/domain/devicesig"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/jobs"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/auth"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/db"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/domain/devicesig"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/jobs"
 )
 
 // DemoPassword is shared by all demo accounts (see TESTING.md).

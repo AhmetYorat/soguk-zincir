@@ -17,7 +17,7 @@ Depo ve frigorifik araçlardaki 2 000 sıcaklık/nem sensörünü izleyen; parti
 ## Kurulum
 
 ```bash
-git clone https://github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat.git && cd ddo-case-ahmet-dervis-yorat
+git clone https://github.com/AhmetYorat/soguk-zincir.git && cd soguk-zincir
 cp .env.example .env
 docker compose up --build
 ```
@@ -284,7 +284,7 @@ cd backend && go test -count=1 -v -cover ./internal/domain/excursion/
 --- PASS: TestBreachesAreOrderedByTime (0.00s)
 PASS
 coverage: 92.5% of statements
-ok  	github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/domain/excursion	3.465s	coverage: 92.5% of statements
+ok  	github.com/AhmetYorat/soguk-zincir/backend/internal/domain/excursion	3.465s	coverage: 92.5% of statements
 ```
 
 Testlerden örnekler: 6 dk'lık iki sapma 20 dk arayla bir saatlik pencereye 12 dk sokar (limit 10 → ihlal), 70 dk arayla hiç aynı pencereye girmez (ihlal yok); 8 × 4 dk'lık sapmada 30 dk'lık kümülatif bütçe tam olarak 8. sapmanın 2. dakikasında biter; 20 dk'lık boşlukta 6 → 10 °C doğrusal çizgi 8 °C'yi tam ortada keser (10 dk sapma); 20 °C ve 30 °C'nin MKT'si bağımsız Python hesabıyla (26,2599 °C) eşleşir.

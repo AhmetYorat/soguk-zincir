@@ -12,9 +12,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/db"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/domain/loadplan"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/httpx"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/db"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/domain/loadplan"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/httpx"
 )
 
 // DefaultSafetyMargin is the shelf life a market must still receive on top of

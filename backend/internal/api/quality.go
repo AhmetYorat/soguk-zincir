@@ -12,9 +12,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/db"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/domain/chain"
-	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/httpx"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/db"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/domain/chain"
+	"github.com/AhmetYorat/soguk-zincir/backend/internal/httpx"
 )
 
 // ---- alarms ----
