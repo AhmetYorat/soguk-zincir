@@ -184,6 +184,7 @@ func (e *Evaluator) SensorPass(ctx context.Context) error {
 	}
 
 	var out []alarmUpsert
+	var reporting []int32 // sensors whose data flows again
 	for _, id := range order {
 		sr := bySensor[id]
 		p := gov[sr.loc]
@@ -234,6 +235,9 @@ func (e *Evaluator) SensorPass(ctx context.Context) error {
 			a.message = fmt.Sprintf("%s: %.2f °C — %s için alt limit %.1f °C'nin altında", sr.code, float64(v)/100, p.Name, float64(rules.MinCC)/100)
 			out = append(out, a)
 		}
+		if now.Sub(last.TS) <= rules.MaxGap {
+			reporting = append(reporting, id)
+		}
 		if now.Sub(last.TS) > rules.MaxGap {
 			a := base
 			a.key, a.rule = key(excursion.RuleGap), excursion.RuleGap
@@ -251,7 +255,19 @@ func (e *Evaluator) SensorPass(ctx context.Context) error {
 			out = append(out, a)
 		}
 	}
-	return e.upsert(ctx, out)
+	if err := e.upsert(ctx, out); err != nil {
+		return err
+	}
+	// A connectivity alarm resolves itself when the sensor reports again;
+	// the closed alarm stays as a record. Temperature alarms always need a
+	// person to close them.
+	if len(reporting) > 0 {
+		if _, err := e.s.pool.Exec(ctx, `UPDATE alarms SET status = 'closed', closed_at = $2
+			WHERE rule = 'gap' AND status <> 'closed' AND sensor_id = ANY($1)`, reporting, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // LotPass refreshes lot shelf life and raises lot-level alarms.

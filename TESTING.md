@@ -2,7 +2,7 @@
 
 ```bash
 cp .env.example .env
-docker compose up --build          # ilk açılış ~1,5 dk (seed: 2 000 sensör × 24 saat geçmiş)
+docker compose up --build          # ilk açılış ~2,5 dk (derleme + seed: 2 000 sensör × 24 saat geçmiş)
 make verify                        # her özellik + her zorlu görev, PASS/FAIL tablosu, hata varsa çıkış kodu ≠ 0
 ```
 
