@@ -103,8 +103,9 @@ services:
   k6:
     image: grafana/k6:0.54.0
     profiles: [load]
+    env_file: .env
     volumes:
-      - ./load:/scripts:ro
+      - ./load:/scripts
     environment:
       API_URL: http://backend:8080
     entrypoint: ["k6", "run", "--summary-export=/scripts/results/summary.json", "/scripts/k6.js"]

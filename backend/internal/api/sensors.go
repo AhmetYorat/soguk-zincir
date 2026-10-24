@@ -53,12 +53,20 @@ func (s *Server) ingestReadings(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return reject("malformed", http.StatusBadRequest, "invalid_body", "cannot read body")
 	}
+	// storage problems are transient for a device: 503 + Retry-After tells it
+	// to keep its backlog and try again, instead of a generic 500
+	unavailable := func(err error) error {
+		httpx.Logger(ctx).Warn("ingest storage unavailable", "err", err)
+		w.Header().Set("Retry-After", "5")
+		s.ingest.Reject("storage_unavailable")
+		return httpx.Errorf(http.StatusServiceUnavailable, "storage_unavailable", "storage temporarily unavailable, retry later")
+	}
 	sensorID, key, err := s.devices.Get(ctx, h.DeviceID)
 	if errors.Is(err, ingest.ErrUnknownDevice) {
 		return reject("unknown_device", http.StatusUnauthorized, "device_unauthenticated", "unknown device")
 	}
 	if err != nil {
-		return err
+		return unavailable(err)
 	}
 	now := s.now()
 	if err := devicesig.Verify(key, h, body, now, s.cfg.SignatureSkew); err != nil {
@@ -101,7 +109,7 @@ func (s *Server) ingestReadings(w http.ResponseWriter, r *http.Request) error {
 		UPDATE sensors SET last_seq = $2, last_seen_at = $3, battery_pct = COALESCE($4, battery_pct)
 		WHERE id = $1 AND last_seq < $2`, sensorID, int64(h.Seq), now, in.BatteryPct)
 	if err != nil {
-		return err
+		return unavailable(err)
 	}
 	if tag.RowsAffected() == 0 {
 		s.markRejected(r, sensorID)

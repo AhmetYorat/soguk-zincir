@@ -24,12 +24,15 @@ verify: env
 	$(COMPOSE) up --build -d --wait backend frontend simulator
 	$(COMPOSE) --profile verify run --rm --build verify
 
-## load: k6 load test (results in load/results/summary.json)
+## load: k6 load test (results in load/results/summary.json); the simulator
+## pauses meanwhile because k6 plays the devices
 load: env
 	@mkdir -p load/results
 	$(COMPOSE) up -d --wait backend
-	$(COMPOSE) --profile load run --rm k6
-	@python3 load/summary.py load/results/summary.json || true
+	$(COMPOSE) stop simulator
+	$(COMPOSE) --profile load run --rm k6 || true
+	$(COMPOSE) start simulator
+	@python3 load/summary.py load/results/summary.json
 
 ## reset-demo: drop all data and seed again with the same SEED
 reset-demo: env
