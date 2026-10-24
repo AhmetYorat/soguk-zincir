@@ -17,7 +17,7 @@ export default function Sensors() {
   const list = usePaged<Sensor>(`/sensors?limit=50&kind=${kind}&q=${encodeURIComponent(query)}`)
   return (
     <>
-      <PageHead title="Sensörler" sub="2 000 sensör, 30 saniyede bir imzalı ölçüm" />
+      <PageHead eyebrow="İzleme" title="Sensörler" sub="2 000 sensör, 30 saniyede bir imzalı ölçüm" />
       <div className="toolbar">
         <div className="seg">
           {[['', 'Tümü'], ['cold_room', 'Soğuk oda'], ['vehicle', 'Araç']].map(([v, l]) => (

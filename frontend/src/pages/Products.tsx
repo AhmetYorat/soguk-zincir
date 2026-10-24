@@ -11,7 +11,7 @@ export default function Products() {
   const list = useAsync((s) => get<{ items: Product[] }>('/products', s), [])
   return (
     <>
-      <PageHead title="Ürünler" sub="Ürün bazlı soğuk zincir kuralları: sıcaklık aralığı, kümülatif sapma, kayan pencere, boşluk politikası" />
+      <PageHead eyebrow="Stok" title="Ürünler" sub="Ürün bazlı soğuk zincir kuralları: sıcaklık aralığı, kümülatif sapma, kayan pencere, boşluk politikası" />
       <Card>
         <AsyncView state={list} isEmpty={(d) => d.items.length === 0} empty="Ürün tanımlı değil.">
           {(d) => (

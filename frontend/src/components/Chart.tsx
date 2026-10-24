@@ -44,7 +44,7 @@ export function TempChart({ points, limits, height = 220 }: { points: Point[]; l
       <svg
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label="Sıcaklık grafiği"
+        aria-label={`Sıcaklık grafiği, ${points.length} nokta${limits ? `, limit ${limits[0]}–${limits[1]} °C` : ''}`}
         onMouseLeave={() => setHover(null)}
         onMouseMove={(e) => {
           const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect()
@@ -69,10 +69,16 @@ export function TempChart({ points, limits, height = 220 }: { points: Point[]; l
             {new Date(t).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
           </text>
         ))}
-        {limits &&
-          limits.map((l) => (
-            <line key={l} x1={pad.l} x2={W - pad.r} y1={geo.y(l)} y2={geo.y(l)} className="limit" />
-          ))}
+        {limits && (
+          <>
+            {/* out-of-range zones, so a breach reads at a glance */}
+            <rect x={pad.l} y={pad.t} width={W - pad.l - pad.r} height={Math.max(0, geo.y(limits[1]) - pad.t)} className="zone" />
+            <rect x={pad.l} y={geo.y(limits[0])} width={W - pad.l - pad.r} height={Math.max(0, H - pad.b - geo.y(limits[0]))} className="zone" />
+            {limits.map((l) => (
+              <line key={l} x1={pad.l} x2={W - pad.r} y1={geo.y(l)} y2={geo.y(l)} className="limit" />
+            ))}
+          </>
+        )}
         <path d={geo.band} className="band" />
         <path d={geo.line} className="line" />
         {hp && hover != null && (

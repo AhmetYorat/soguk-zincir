@@ -16,25 +16,48 @@ import Audit from './pages/Audit'
 import Driver from './pages/Driver'
 import Customer, { CustomerShipment } from './pages/Customer'
 import Products from './pages/Products'
+import { Icon, IconName } from './components/Icon'
+import { applyTheme, loadTheme, nextTheme, ThemePref } from './theme'
 
-type NavItem = { to: string; label: string; perm: string }
+type NavItem = { to: string; label: string; perm: string; icon: IconName }
+type NavGroup = { title: string; items: NavItem[] }
 
 // The menu only shows what the role may do; the API enforces the same
 // permissions server side, the menu is a convenience.
-const nav: NavItem[] = [
-  { to: '/', label: 'Canlı pano', perm: 'live:read' },
-  { to: '/lots', label: 'Partiler', perm: 'catalog:read' },
-  { to: '/units', label: 'Paletler', perm: 'catalog:read' },
-  { to: '/products', label: 'Ürünler', perm: 'catalog:read' },
-  { to: '/sensors', label: 'Sensörler', perm: 'sensors:read' },
-  { to: '/alarms', label: 'Alarmlar', perm: 'alarms:read' },
-  { to: '/haccp', label: 'HACCP', perm: 'haccp:read' },
-  { to: '/shipments', label: 'Sevkiyatlar', perm: 'shipments:read' },
-  { to: '/trace', label: 'İzlenebilirlik', perm: 'trace:read' },
-  { to: '/reports', label: 'Sapma raporları', perm: 'reports:read' },
-  { to: '/audit', label: 'Denetim kaydı', perm: 'audit:read' },
-  { to: '/driver', label: 'Teslimatlarım', perm: 'driver:app' },
-  { to: '/customer', label: 'Sevkiyatlarım', perm: 'customer:portal' },
+const nav: NavGroup[] = [
+  {
+    title: 'İzleme',
+    items: [
+      { to: '/', label: 'Canlı pano', perm: 'live:read', icon: 'gauge' },
+      { to: '/sensors', label: 'Sensörler', perm: 'sensors:read', icon: 'thermo' },
+      { to: '/alarms', label: 'Alarmlar', perm: 'alarms:read', icon: 'bell' },
+    ],
+  },
+  {
+    title: 'Stok',
+    items: [
+      { to: '/lots', label: 'Partiler', perm: 'catalog:read', icon: 'boxes' },
+      { to: '/units', label: 'Paletler', perm: 'catalog:read', icon: 'pallet' },
+      { to: '/products', label: 'Ürünler', perm: 'catalog:read', icon: 'tag' },
+    ],
+  },
+  {
+    title: 'Operasyon',
+    items: [
+      { to: '/shipments', label: 'Sevkiyatlar', perm: 'shipments:read', icon: 'truck' },
+      { to: '/driver', label: 'Teslimatlarım', perm: 'driver:app', icon: 'phone' },
+      { to: '/customer', label: 'Sevkiyatlarım', perm: 'customer:portal', icon: 'store' },
+    ],
+  },
+  {
+    title: 'Kalite ve uyum',
+    items: [
+      { to: '/haccp', label: 'HACCP', perm: 'haccp:read', icon: 'clipboard' },
+      { to: '/trace', label: 'İzlenebilirlik', perm: 'trace:read', icon: 'route' },
+      { to: '/reports', label: 'Sapma raporları', perm: 'reports:read', icon: 'link' },
+      { to: '/audit', label: 'Denetim kaydı', perm: 'audit:read', icon: 'scroll' },
+    ],
+  },
 ]
 
 function home(u: User): string {
@@ -43,13 +66,43 @@ function home(u: User): string {
   return '/'
 }
 
+function initials(name: string) {
+  return name
+    .split(' ')
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join('')
+    .toLocaleUpperCase('tr-TR')
+}
+
 function LiveDot() {
   const live = useAsync((s) => get<{ ingest: { readings_per_second: number } }>('/live', s), [], 10000)
   const rate = live.data?.ingest.readings_per_second ?? 0
   return (
-    <span className={'live ' + (rate > 0 ? 'on' : 'off')} title="Sensörlerden gelen ölçüm hızı">
-      <i /> {rate > 0 ? `${rate.toFixed(0)} ölçüm/sn` : 'veri akışı yok'}
+    <span className={'live ' + (rate > 0 ? 'on' : 'off')} title="Sensörlerden gelen ölçüm hızı" aria-live="polite">
+      <i aria-hidden /> {rate > 0 ? `${rate.toFixed(0)} ölçüm/sn` : 'veri akışı yok'}
     </span>
+  )
+}
+
+const themeLabel: Record<ThemePref, string> = { system: 'Tema: sistem', light: 'Tema: açık', dark: 'Tema: koyu' }
+const themeIcon: Record<ThemePref, IconName> = { system: 'monitor', light: 'sun', dark: 'moon' }
+
+function ThemeButton() {
+  const [pref, setPref] = useState<ThemePref>(loadTheme())
+  return (
+    <button
+      className="icon-btn"
+      title={themeLabel[pref]}
+      aria-label={themeLabel[pref] + ' (değiştir)'}
+      onClick={() => {
+        const next = nextTheme[pref]
+        applyTheme(next)
+        setPref(next)
+      }}
+    >
+      <Icon name={themeIcon[pref]} />
+    </button>
   )
 }
 
@@ -57,38 +110,58 @@ function Shell({ user }: { user: User }) {
   const [open, setOpen] = useState(false)
   const loc = useLocation()
   useEffect(() => setOpen(false), [loc.pathname])
-  const items = nav.filter((n) => can(n.perm))
+  const groups = nav.map((g) => ({ ...g, items: g.items.filter((n) => can(n.perm)) })).filter((g) => g.items.length)
   const guard = (perm: string, el: JSX.Element) => (can(perm) ? el : <Navigate to={home(user)} replace />)
 
   return (
     <div className="shell">
+      <a className="skip-link" href="#main">İçeriğe geç</a>
       <header className="topbar">
-        <button className="menu-btn" aria-label="Menü" aria-expanded={open} onClick={() => setOpen(!open)}>
-          ☰
+        <button className="icon-btn menu-btn" aria-label={open ? 'Menüyü kapat' : 'Menüyü aç'} aria-expanded={open} onClick={() => setOpen(!open)}>
+          <Icon name={open ? 'close' : 'menu'} size={20} />
         </button>
         <div className="brand">
           <span className="logo" aria-hidden>
-            ❄
+            <Icon name="snow" size={20} />
           </span>
-          SoğukZincir
+          <span>
+            SoğukZincir
+            <small>soğuk zincir izleme</small>
+          </span>
         </div>
         {can('live:read') && <LiveDot />}
         <div className="user">
-          <span className="user-name">{user.full_name}</span>
-          <span className="badge info">{roleLabel[user.role]}</span>
-          <button className="btn ghost small" onClick={() => logout()}>
-            Çıkış
+          <ThemeButton />
+          <div className="user-chip">
+            <span className="avatar" aria-hidden>{initials(user.full_name)}</span>
+            <span className="user-meta">
+              <span className="user-name">{user.full_name}</span>
+              <span className="user-role">{roleLabel[user.role]}</span>
+            </span>
+          </div>
+          <button className="icon-btn" onClick={() => logout()} title="Çıkış" aria-label="Çıkış yap">
+            <Icon name="logout" />
           </button>
         </div>
       </header>
-      <nav className={'sidebar ' + (open ? 'open' : '')}>
-        {items.map((n) => (
-          <NavLink key={n.to} to={n.to} end={n.to === '/'}>
-            {n.label}
-          </NavLink>
+      {open && <div className="scrim" onClick={() => setOpen(false)} aria-hidden />}
+      <nav className={'sidebar ' + (open ? 'open' : '')} aria-label="Ana menü">
+        {groups.map((g) => (
+          <div key={g.title} role="group" aria-label={g.title}>
+            <div className="nav-group">{g.title}</div>
+            {g.items.map((n) => (
+              <NavLink key={n.to} to={n.to} end={n.to === '/'}>
+                <Icon name={n.icon} /> {n.label}
+              </NavLink>
+            ))}
+          </div>
         ))}
+        <div className="sidebar-foot">
+          <span className="mono">{roleLabel[user.role]}</span>
+          <div>{user.email}</div>
+        </div>
       </nav>
-      <main className="content">
+      <main className="content" id="main" tabIndex={-1}>
         <Routes>
           <Route path="/" element={guard('live:read', <Dashboard />)} />
           <Route path="/lots" element={guard('catalog:read', <Lots />)} />

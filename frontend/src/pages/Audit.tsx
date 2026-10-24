@@ -10,7 +10,7 @@ export default function Audit() {
   const list = usePaged<Entry>(`/audit?limit=50&entity=${entity}`)
   return (
     <>
-      <PageHead title="Denetim kaydı" sub="Eklemeli (append-only): kim, ne zaman, neyi, eski ve yeni değer. Değiştirme ve silme veritabanında engellenir." />
+      <PageHead eyebrow="Kalite ve uyum" title="Denetim kaydı" sub="Eklemeli (append-only): kim, ne zaman, neyi, eski ve yeni değer. Değiştirme ve silme veritabanında engellenir." />
       <div className="toolbar">
         <select value={entity} onChange={(e) => setEntity(e.target.value)} aria-label="Varlık">
           <option value="">Tüm varlıklar</option>

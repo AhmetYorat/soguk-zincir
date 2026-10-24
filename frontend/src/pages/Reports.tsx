@@ -13,6 +13,7 @@ export default function Reports() {
   return (
     <>
       <PageHead
+        eyebrow="Kalite ve uyum"
         title="Sapma raporları"
         sub="Değiştirilemez kayıt: her rapor bir öncekinin hash'ini içerir (SHA-256 zinciri). Tablo UPDATE/DELETE'i tetikleyiciyle reddeder."
         actions={<button className="btn primary" disabled={verify.pending} onClick={async () => setResult(await verify.run())}>Zinciri doğrula</button>}

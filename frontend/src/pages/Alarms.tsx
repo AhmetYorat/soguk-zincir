@@ -18,7 +18,7 @@ export default function Alarms() {
 
   return (
     <>
-      <PageHead title="Alarmlar" sub="Aynı koşul için tek canlı alarm tutulur; onaylanmayan alarm 10 dakikada bir eskale edilir (1: kalite, 2: operasyon, 3: herkes)." />
+      <PageHead eyebrow="İzleme" title="Alarmlar" sub="Aynı koşul için tek canlı alarm tutulur; onaylanmayan alarm 10 dakikada bir eskale edilir (1: kalite, 2: operasyon, 3: herkes)." />
       <div className="toolbar">
         <div className="seg">
           {[['live', 'Canlı'], ['open', 'Açık'], ['acknowledged', 'Onaylı'], ['closed', 'Kapalı'], ['', 'Tümü']].map(([v, l]) => (

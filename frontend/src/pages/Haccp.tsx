@@ -15,7 +15,7 @@ export default function Haccp() {
   const [active, setActive] = useState<Checklist>()
   return (
     <>
-      <PageHead title="HACCP kontrol listeleri" sub="Kritik kontrol noktaları; başarısız madde düzeltici faaliyet olmadan kaydedilemez" />
+      <PageHead eyebrow="Kalite ve uyum" title="HACCP kontrol listeleri" sub="Kritik kontrol noktaları; başarısız madde düzeltici faaliyet olmadan kaydedilemez" />
       <div className="grid-2">
         <div className="stack">
           <Card title="Listeler">

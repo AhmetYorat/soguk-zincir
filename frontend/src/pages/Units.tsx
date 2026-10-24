@@ -29,7 +29,7 @@ export default function Units() {
 
   return (
     <>
-      <PageHead title="Paletler" sub="Palet bölme, birleştirme ve taşıma. Her işlem soy ağacına (lineage) kaydedilir." />
+      <PageHead eyebrow="Stok" title="Paletler" sub="Palet bölme, birleştirme ve taşıma. Her işlem soy ağacına (lineage) kaydedilir." />
       <div className="toolbar">
         <div className="seg">
           {[['active', 'Depoda'], ['loaded', 'Araçta'], ['delivered', 'Teslim'], ['consumed', 'Birleştirilmiş'], ['', 'Tümü']].map(([v, l]) => (

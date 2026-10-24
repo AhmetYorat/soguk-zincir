@@ -863,36 +863,44 @@ func (r *runner) t4FEFO() {
 	fmt.Println("T-4 Kalan raf ömrü ve FEFO sevkiyat planı")
 	ops := r.as("operasyon")
 	r.check("T-4", "FEFO planı: kısa raf ömürlü paletler elenir, seçim son kullanma sırasına göre", func() (bool, string) {
-		// the seeded planned shipments start at the stock rooms
-		list := ops.get("/api/v1/shipments?status=planned&limit=50")
-		for _, it := range arr(list.JSON()["items"]) {
-			sid := id(m(it)["id"])
-			for product := int64(1); product <= 12; product++ {
-				res := ops.post(fmt.Sprintf("/api/v1/shipments/%d/plan", sid), map[string]any{"lines": []map[string]any{{"product_id": product, "quantity": 2000}}})
-				if res.Status != 200 {
-					continue
-				}
-				line := m(arr(res.JSON()["lines"])[0])
-				sel, rej := arr(line["selected"]), arr(line["rejected"])
-				shelf := false
-				for _, x := range rej {
-					if strings.Contains(str(m(x)["reason"]), "shelf life") {
-						shelf = true
-					}
-				}
-				if len(sel) >= 2 && shelf {
-					for i := 1; i < len(sel); i++ {
-						if str(m(sel[i])["expires_at"]) < str(m(sel[i-1])["expires_at"]) {
-							return fail("selection not FEFO ordered")
-						}
-					}
-					r.ctx["planShipment"], r.ctx["planProduct"] = sid, product
-					r.ctx["rejectedUnit"] = id(m(m(rej[0])["candidate"])["unit_id"])
-					return pass("sevkiyat %d ürün %d: %d seçili, %d elendi", sid, product, len(sel), len(rej))
-				}
+		// Self-contained scenario, independent of the seeded lots' current
+		// state: three ready-meal lots (72 h shelf life) with 10, 40 and 60
+		// hours left in an empty chilled room, and a 3-hour shipment from it.
+		room := r.emptyChilledRoom()
+		if room == 0 {
+			return fail("no empty chilled room")
+		}
+		op := r.as("depo")
+		units := map[int]int64{}
+		for _, left := range []int{60, 10, 40} {
+			res := op.post("/api/v1/lots", map[string]any{"code": fmt.Sprintf("VER-FEFO-%d-%s", left, uuid.NewString()[:6]), "product_id": 12,
+				"location_id": room, "produced_at": time.Now().Add(-time.Duration(72-left) * time.Hour).UTC().Format(time.RFC3339), "pallets": []int{100}})
+			if res.Status != 201 {
+				return fail("create lot: %s", res)
+			}
+			units[left] = id(arr(res.JSON()["unit_ids"])[0])
+		}
+		sid := r.newShipment(room, 180)
+		res := ops.post(fmt.Sprintf("/api/v1/shipments/%d/plan", sid), map[string]any{"lines": []map[string]any{{"product_id": 12, "quantity": 1000}}})
+		if res.Status != 200 {
+			return fail("plan: %s", res)
+		}
+		line := m(arr(res.JSON()["lines"])[0])
+		var sel []int64
+		for _, x := range arr(line["selected"]) {
+			sel = append(sel, id(m(x)["unit_id"]))
+		}
+		rejected := false
+		for _, x := range arr(line["rejected"]) {
+			if id(m(m(x)["candidate"])["unit_id"]) == units[10] && strings.Contains(str(m(x)["reason"]), "shelf life") {
+				rejected = true
 			}
 		}
-		return fail("no planned shipment with both selections and shelf-life rejections")
+		if !rejected || len(sel) != 2 || sel[0] != units[40] || sel[1] != units[60] {
+			return fail("selected %v (want [%d %d]), 10 h lot rejected: %v", sel, units[40], units[60], rejected)
+		}
+		r.ctx["planShipment"], r.ctx["rejectedUnit"] = sid, units[10]
+		return pass("10 sa kalan elendi; 40 sa, 60 sa sırasıyla seçildi")
 	})
 	r.check("T-4", "Raf ömrü yetmeyen palet yüklenmeye çalışılınca 409", func() (bool, string) {
 		sid, ok := r.ctx["planShipment"].(int64)
@@ -1129,4 +1137,18 @@ func (r *runner) driverShipment(driver string) (int64, string) {
 		return 0, "depart: " + res.String()
 	}
 	return sid, ""
+}
+
+// emptyChilledRoom returns a cold room without stock, so a scenario does not
+// mix with the seeded pallets.
+func (r *runner) emptyChilledRoom() int64 {
+	res := r.as("operasyon").get("/api/v1/locations?kind=cold_room")
+	items := arr(res.JSON()["items"])
+	for i := len(items) - 1; i >= 0; i-- {
+		l := m(items[i])
+		if num(l["active_units"]) == 0 && !strings.Contains(str(l["name"]), "Donuk") {
+			return id(l["id"])
+		}
+	}
+	return 0
 }

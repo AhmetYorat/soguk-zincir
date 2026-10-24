@@ -27,7 +27,7 @@ export default function Trace() {
 
   return (
     <>
-      <PageHead title="İzlenebilirlik ve geri çağırma" sub="Palet bölme/birleştirme sonrası partinin hangi müşteriye, hangi araçla gittiği (recursive sorgu)" />
+      <PageHead eyebrow="Kalite ve uyum" title="İzlenebilirlik ve geri çağırma" sub="Palet bölme/birleştirme sonrası partinin hangi müşteriye, hangi araçla gittiği (recursive sorgu)" />
       <form className="toolbar" onSubmit={find}>
         <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Parti kodu" />
         <button className="btn primary">İzle</button>

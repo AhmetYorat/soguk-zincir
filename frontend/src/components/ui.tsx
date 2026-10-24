@@ -1,6 +1,7 @@
 import { ReactNode } from 'react'
 import { ApiError } from '../api'
 import { Async } from '../hooks'
+import { Icon, IconName } from './Icon'
 
 // AsyncView renders the three states every screen must handle: loading,
 // error (with retry) and empty; children only get real data.
@@ -16,9 +17,13 @@ export function AsyncView<T>({
   children: (data: T) => ReactNode
 }) {
   if (state.loading && state.data === undefined) {
+    // skeleton keeps the space so the page does not jump when data arrives
     return (
-      <div className="state" role="status" aria-live="polite">
-        <span className="spinner" aria-hidden /> Yükleniyor…
+      <div className="skeleton" role="status" aria-live="polite" aria-label="Yükleniyor">
+        <span />
+        <span />
+        <span />
+        <span />
       </div>
     )
   }
@@ -27,7 +32,12 @@ export function AsyncView<T>({
   }
   if (state.data === undefined) return null
   if (isEmpty?.(state.data)) {
-    return <div className="state empty">{empty ?? 'Kayıt yok.'}</div>
+    return (
+      <div className="state empty">
+        <Icon name="info" size={28} />
+        {empty ?? 'Kayıt yok.'}
+      </div>
+    )
   }
   return <>{children(state.data)}</>
 }
@@ -36,7 +46,8 @@ export function ErrorBox({ error, onRetry }: { error: ApiError; onRetry?: () => 
   const fields = (error.details?.fields ?? {}) as Record<string, string>
   return (
     <div className="state error" role="alert">
-      <strong>{error.status === 403 ? 'Bu işlem için yetkiniz yok.' : error.message}</strong>
+      <strong className="row">
+        <Icon name="alert" />{error.status === 403 ? 'Bu işlem için yetkiniz yok.' : error.message}</strong>
       {Object.keys(fields).length > 0 && (
         <ul>
           {Object.entries(fields).map(([k, v]) => (
@@ -83,10 +94,13 @@ const ruleLabel: Record<string, string> = {
 }
 export const ruleName = (r: string) => ruleLabel[r] ?? r
 
-export function Kpi({ label, value, hint, tone }: { label: string; value: ReactNode; hint?: string; tone?: string }) {
+export function Kpi({ label, value, hint, tone, icon }: { label: string; value: ReactNode; hint?: string; tone?: string; icon?: IconName }) {
   return (
     <div className={'kpi ' + (tone ?? '')}>
-      <div className="kpi-label">{label}</div>
+      <div className="kpi-label">
+        {icon && <Icon name={icon} size={15} />}
+        {label}
+      </div>
       <div className="kpi-value">{value}</div>
       {hint && <div className="kpi-hint">{hint}</div>}
     </div>
@@ -117,10 +131,11 @@ export function Field({ label, children, hint }: { label: string; children: Reac
   )
 }
 
-export function PageHead({ title, sub, actions }: { title: string; sub?: string; actions?: ReactNode }) {
+export function PageHead({ title, sub, actions, eyebrow }: { title: string; sub?: string; actions?: ReactNode; eyebrow?: string }) {
   return (
     <div className="page-head">
       <div>
+        {eyebrow && <div className="eyebrow">{eyebrow}</div>}
         <h1>{title}</h1>
         {sub && <p className="muted">{sub}</p>}
       </div>
@@ -140,6 +155,13 @@ export function MoreButton({ cursor, onMore, loading }: { cursor: string | null 
   )
 }
 
+const noticeIcon: Record<string, IconName> = { ok: 'check', warn: 'alert', bad: 'alert', info: 'info' }
+
 export function Notice({ tone, children }: { tone: 'ok' | 'warn' | 'bad' | 'info'; children: ReactNode }) {
-  return <div className={'notice ' + tone}>{children}</div>
+  return (
+    <div className={'notice ' + tone} role={tone === 'bad' ? 'alert' : 'status'}>
+      <Icon name={noticeIcon[tone]} />
+      <div>{children}</div>
+    </div>
+  )
 }

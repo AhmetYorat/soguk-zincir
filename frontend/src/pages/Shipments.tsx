@@ -15,7 +15,7 @@ export default function Shipments() {
   const [showNew, setShowNew] = useState(false)
   return (
     <>
-      <PageHead title="Sevkiyatlar" sub="FEFO planı, kapasite kısıtlı yükleme, yola çıkış" actions={can('shipments:plan') && <button className="btn primary" onClick={() => setShowNew(!showNew)}>Yeni sevkiyat</button>} />
+      <PageHead eyebrow="Operasyon" title="Sevkiyatlar" sub="FEFO planı, kapasite kısıtlı yükleme, yola çıkış" actions={can('shipments:plan') && <button className="btn primary" onClick={() => setShowNew(!showNew)}>Yeni sevkiyat</button>} />
       {showNew && <NewShipment />}
       <div className="toolbar">
         <div className="seg wrap">

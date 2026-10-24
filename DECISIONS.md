@@ -157,4 +157,6 @@ Her kayıt: **bağlam → karar → sonuç / bedeli**. Kodda ilgili yer belirtil
 
 **Karar.** React 18 + Vite + TS; bağımlılık yalnızca `react-router-dom`. Grafik elle SVG (bant: min–maks, çizgi: ortalama, kesikli: ürün limitleri). Her ekran `AsyncView` ile yükleniyor / boş / hata durumlarını zorunlu ele alır. Şoför ekranı olayları `localStorage` kuyruğuna yazar, `online` olayında ve 20 sn'de bir gönderir; "çevrimdışı modu dene" anahtarı demo içindir. Üretim imajı nginx-unprivileged (uid 101), `/api` aynı origin'den backend'e vekillenir (CORS gerekmez).
 
+Görsel dil: soğuk lacivert yüzeyler, buz mavisi marka rengi ve tek bir imza öğesi — soğuktan sıcağa termal ölçek (üst çubuktaki şerit, canlı panodaki dikey göstergeler, grafikte limit dışı bölgeler). Yazı: IBM Plex Sans (arayüz) + JetBrains Mono (sıcaklık, kod, sayı; hizalı rakamlar). Durum hiçbir yerde yalnızca renkle verilmez (nokta + metin, "limit dışı" etiketi); açık/koyu/sistem tema seçici, iskelet yükleme, `prefers-reduced-motion` desteği, emoji yerine tek bir SVG ikon ailesi.
+
 **Sonuç.** İmaj küçük, derleme ~10 sn. Bedeli: tam bir PWA (service worker, arka plan senkronu) yapılmadı; sayfa çevrimdışıyken *yeniden yüklenirse* uygulama kabuğu gelmez (açık sekmede çalışmaya devam eder).

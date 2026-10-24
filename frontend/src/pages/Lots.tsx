@@ -30,6 +30,7 @@ export default function Lots() {
   return (
     <>
       <PageHead
+        eyebrow="Stok"
         title="Partiler"
         sub="Ürün partileri, stok ve kalan raf ömrü"
         actions={can('catalog:write') && <button className="btn primary" onClick={() => setShowNew(!showNew)}>Parti kabulü</button>}

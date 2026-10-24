@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError, fmtDuration, fmtTime, get } from '../api'
 import { useAsync, useOnline } from '../hooks'
 import { AsyncView, Card, ErrorBox, Notice, PageHead, Status } from '../components/ui'
+import { Icon } from '../components/Icon'
 import { DriverEvent, OfflineQueue, safeLocalStorage, sync, SyncResult } from '../offline'
 
 type Shipment = {
@@ -72,9 +73,12 @@ export default function Driver() {
 
   return (
     <>
-      <PageHead title="Teslimatlarım" sub="Bağlantı yokken de çalışır: kayıtlar telefonda tutulur, bağlantı gelince gönderilir." />
+      <PageHead eyebrow="Şoför" title="Teslimatlarım" sub="Bağlantı yokken de çalışır: kayıtlar telefonda tutulur, bağlantı gelince gönderilir." />
       <div className={'netbar ' + (connected ? 'on' : 'off')}>
-        <span>{connected ? '● Çevrimiçi' : '○ Çevrimdışı — kayıtlar sıraya alınıyor'}</span>
+        <span>
+          <Icon name={connected ? 'wifi' : 'wifiOff'} />
+          {connected ? 'Çevrimiçi' : 'Çevrimdışı — kayıtlar telefonda sıraya alınıyor'}
+        </span>
         <label className="row small">
           <input type="checkbox" checked={forcedOffline} onChange={(e) => setForcedOffline(e.target.checked)} /> Çevrimdışı modu dene
         </label>

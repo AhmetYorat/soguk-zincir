@@ -9,7 +9,7 @@ export default function Customer() {
   const list = useAsync((s) => get<Page<Shipment>>('/customer/shipments?limit=50', s), [])
   return (
     <>
-      <PageHead title="Sevkiyatlarım" sub="Size gelen ürünler ve yol boyunca sıcaklık geçmişi" />
+      <PageHead eyebrow="Müşteri portalı" title="Sevkiyatlarım" sub="Size gelen ürünler ve yol boyunca sıcaklık geçmişi" />
       <Card>
         <AsyncView state={list} isEmpty={(d) => d.items.length === 0} empty="Henüz sevkiyat yok.">
           {(d) => (
