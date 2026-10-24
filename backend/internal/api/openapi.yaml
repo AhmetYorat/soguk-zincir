@@ -1,1 +1,700 @@
 openapi: 3.0.3
+info:
+  title: SoğukZincir API
+  version: 1.0.0
+  description: |
+    Gıda dağıtımı için soğuk zincir izleme ve uyum sistemi.
+
+    * Kullanıcı uçları `Authorization: Bearer <access_token>` ister; yetki rol tabanlıdır (her uçta `x-permission`).
+    * Sensör cihazları kullanıcı tokenı yerine HMAC imzası kullanır (`/api/v1/ingest/readings`).
+    * Kritik POST uçları `Idempotency-Key` başlığını destekler: aynı anahtar + aynı gövde aynı yanıtı döndürür
+      (`Idempotent-Replayed: true`), farklı gövde 422 alır.
+    * Tüm hatalar `{"error":{"code","message","details"}}` biçimindedir.
+    * Listeler keyset sayfalıdır: `?limit=&cursor=`, yanıtta `next_cursor`.
+    * Sıcaklıklar santi-derece (`*_cc`, 4.25 °C = 425), nem binde (`*_pm`), para kuruş (`*_kurus`) olarak tamsayıdır.
+servers:
+  - url: http://localhost:8080
+security:
+  - bearer: []
+tags:
+  - name: system
+  - name: auth
+  - name: catalog
+  - name: sensors
+  - name: alarms
+  - name: quality
+  - name: haccp
+  - name: shipments
+  - name: driver
+  - name: trace
+  - name: customer
+  - name: audit
+
+paths:
+  /health:
+    get:
+      tags: [system]
+      summary: Sağlık durumu (veritabanı bağlantısı dahil)
+      security: []
+      responses:
+        "200": { description: Sağlıklı, content: { application/json: { schema: { $ref: "#/components/schemas/Health" } } } }
+        "503": { description: Veritabanına ulaşılamıyor }
+  /metrics:
+    get:
+      tags: [system]
+      summary: Prometheus metrikleri
+      security: []
+      responses: { "200": { description: text/plain exposition format } }
+
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      summary: E-posta + parola ile giriş; access + refresh token döner
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties: { email: { type: string, format: email }, password: { type: string } }
+      responses:
+        "200": { $ref: "#/components/responses/Tokens" }
+        "401": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /api/v1/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Refresh token döndürme. Daha önce kullanılmış token tüm oturum ailesini iptal eder.
+      security: []
+      requestBody: { $ref: "#/components/requestBodies/RefreshToken" }
+      responses:
+        "200": { $ref: "#/components/responses/Tokens" }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      summary: Oturum ailesini iptal eder
+      security: []
+      requestBody: { $ref: "#/components/requestBodies/RefreshToken" }
+      responses: { "204": { description: Çıkış yapıldı } }
+  /api/v1/auth/me:
+    get:
+      tags: [auth]
+      summary: Oturumdaki kullanıcı ve izinleri
+      responses:
+        "200": { description: Kullanıcı, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/ingest/readings:
+    post:
+      tags: [sensors]
+      summary: Cihazdan imzalı ölçüm alımı
+      description: |
+        İmza: `hex(HMAC-SHA256(device_key, "v1\n" + X-Device-Id + "\n" + X-Seq + "\n" + X-Timestamp + "\n" + hex(sha256(body))))`.
+        X-Seq son kabul edilenden büyük olmalı (tekrar saldırısı → 409), X-Timestamp ±2 dk içinde olmalı.
+      security: []
+      parameters:
+        - { name: X-Device-Id, in: header, required: true, schema: { type: string, example: S-00001 } }
+        - { name: X-Seq, in: header, required: true, schema: { type: integer, format: int64 } }
+        - { name: X-Timestamp, in: header, required: true, schema: { type: integer, format: int64, description: unix ms } }
+        - { name: X-Signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [readings]
+              properties:
+                battery_pct: { type: integer, minimum: 0, maximum: 100 }
+                readings:
+                  type: array
+                  maxItems: 1000
+                  items:
+                    type: object
+                    required: [ts, temp_cc, humidity_pm]
+                    properties:
+                      ts: { type: string, format: date-time }
+                      temp_cc: { type: integer }
+                      humidity_pm: { type: integer }
+      responses:
+        "202": { description: Kabul edildi, tampona alındı }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { description: Tampon dolu, Retry-After ile tekrar deneyin }
+
+  /api/v1/live:
+    get:
+      tags: [sensors]
+      summary: Canlı pano sayaçları (ölçüm/sn, açık alarmlar, yoldaki sevkiyatlar)
+      x-permission: live:read
+      responses: { "200": { description: Sayaçlar } }
+
+  /api/v1/products:
+    get:
+      tags: [catalog]
+      summary: Ürünler ve soğuk zincir kuralları
+      x-permission: catalog:read
+      responses: { "200": { description: Ürün listesi } }
+    post:
+      tags: [catalog]
+      summary: Ürün oluştur
+      x-permission: catalog:write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Product" } } }
+      responses:
+        "201": { description: Oluşturuldu }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /api/v1/products/{id}:
+    get:
+      tags: [catalog]
+      summary: Ürün
+      x-permission: catalog:read
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses: { "200": { description: Ürün }, "404": { $ref: "#/components/responses/Error" } }
+  /api/v1/lots:
+    get:
+      tags: [catalog]
+      summary: Partiler (status, q, product_id filtreleri)
+      x-permission: catalog:read
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - { name: status, in: query, schema: { type: string, enum: [released, on_hold, accepted, discounted, destroyed, recalled] } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: product_id, in: query, schema: { type: integer } }
+      responses: { "200": { description: Sayfalı liste } }
+    post:
+      tags: [catalog]
+      summary: Parti kabulü; her palet için bir birim oluşturur
+      x-permission: catalog:write
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, product_id, produced_at, location_id, pallets]
+              properties:
+                code: { type: string }
+                product_id: { type: integer }
+                produced_at: { type: string, format: date-time }
+                location_id: { type: integer, description: soğuk oda }
+                pallets: { type: array, items: { type: integer, minimum: 1 }, description: palet başına adet }
+      responses:
+        "201": { description: Oluşturuldu }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /api/v1/lots/{id}:
+    get:
+      tags: [catalog]
+      summary: Parti ve paletleri
+      x-permission: catalog:read
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses: { "200": { description: Parti } }
+  /api/v1/lots/{id}/evaluation:
+    get:
+      tags: [quality]
+      summary: Sapma motoru sonucu (kümülatif sapma, kayan pencere, boşluklar, MKT, kalan raf ömrü) palet bazında
+      x-permission: catalog:read
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses: { "200": { description: Değerlendirme } }
+  /api/v1/lots/{id}/decisions:
+    get:
+      tags: [quality]
+      summary: Kalite kararları geçmişi
+      x-permission: catalog:read
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses: { "200": { description: Kararlar } }
+    post:
+      tags: [quality]
+      summary: Kalite kararı (kabul / indirim / imha). Satır kilidiyle eşzamanlı kararlar sıraya girer.
+      x-permission: quality:decide
+      parameters: [{ $ref: "#/components/parameters/ID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reason]
+              properties:
+                decision: { type: string, enum: [accept, discount, destroy] }
+                discount_pct: { type: integer, minimum: 1, maximum: 99 }
+                reason: { type: string, minLength: 3 }
+                nonconformity_id: { type: integer }
+      responses:
+        "201": { description: Karar kaydedildi }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /api/v1/lots/{id}/excursion-reports:
+    post:
+      tags: [quality]
+      summary: Partinin güncel değerlendirmesini değiştirilemez, hash zincirli rapor olarak dondurur
+      x-permission: reports:write
+      parameters: [{ $ref: "#/components/parameters/ID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses: { "201": { description: Rapor (seq, prev_hash, hash, payload) } }
+  /api/v1/excursion-reports:
+    get:
+      tags: [quality]
+      summary: Sapma raporları
+      x-permission: reports:read
+      parameters: [{ $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }]
+      responses: { "200": { description: Sayfalı liste } }
+  /api/v1/excursion-reports/verify:
+    get:
+      tags: [quality]
+      summary: Zinciri baştan yeniden hesaplar; ilk tutarsızlığı döner
+      x-permission: reports:read
+      responses: { "200": { description: "{valid, entries, head_seq, head_hash, problem?}" } }
+  /api/v1/excursion-reports/{seq}:
+    get:
+      tags: [quality]
+      summary: Tek rapor ve içeriği
+      x-permission: reports:read
+      parameters: [{ name: seq, in: path, required: true, schema: { type: integer } }]
+      responses: { "200": { description: Rapor } }
+
+  /api/v1/locations:
+    get:
+      tags: [catalog]
+      summary: Soğuk odalar, araçlar, müşteri noktaları
+      x-permission: catalog:read
+      parameters: [{ name: kind, in: query, schema: { type: string, enum: [cold_room, vehicle, customer] } }]
+      responses: { "200": { description: Lokasyonlar } }
+  /api/v1/locations/{id}/readings:
+    get:
+      tags: [sensors]
+      summary: Lokasyondaki tüm sensörlerin serisi
+      x-permission: sensors:read
+      parameters: [{ $ref: "#/components/parameters/ID" }, { $ref: "#/components/parameters/From" }, { $ref: "#/components/parameters/To" }, { $ref: "#/components/parameters/Resolution" }]
+      responses: { "200": { description: Seri } }
+  /api/v1/vehicles:
+    get:
+      tags: [catalog]
+      summary: Araçlar ve kapasiteleri
+      x-permission: catalog:read
+      responses: { "200": { description: Araçlar } }
+  /api/v1/units:
+    get:
+      tags: [catalog]
+      summary: Paletler (status, location_id, lot_id, q)
+      x-permission: catalog:read
+      parameters: [{ $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }]
+      responses: { "200": { description: Sayfalı liste } }
+  /api/v1/units/{id}:
+    get:
+      tags: [catalog]
+      summary: Palet ve içeriği
+      x-permission: catalog:read
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses: { "200": { description: Palet } }
+  /api/v1/units/{id}/split:
+    post:
+      tags: [catalog]
+      summary: Paletten yeni palet ayır (koşullu UPDATE ile stok negatife düşmez)
+      x-permission: units:operate
+      parameters: [{ $ref: "#/components/parameters/ID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [quantity], properties: { lot_id: { type: integer }, quantity: { type: integer } } }
+      responses: { "201": { description: Yeni palet }, "409": { $ref: "#/components/responses/Error" } }
+  /api/v1/units/merge:
+    post:
+      tags: [catalog]
+      summary: Aynı lokasyondaki paletleri birleştir (karışık palet)
+      x-permission: units:operate
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [unit_ids], properties: { unit_ids: { type: array, items: { type: integer } } } }
+      responses: { "201": { description: Birleşik palet }, "409": { $ref: "#/components/responses/Error" } }
+  /api/v1/units/{id}/move:
+    post:
+      tags: [catalog]
+      summary: Paleti başka soğuk odaya taşı
+      x-permission: units:operate
+      parameters: [{ $ref: "#/components/parameters/ID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [location_id], properties: { location_id: { type: integer } } }
+      responses: { "200": { description: Taşındı } }
+
+  /api/v1/sensors:
+    get:
+      tags: [sensors]
+      summary: Sensörler (kind, q)
+      x-permission: sensors:read
+      parameters: [{ $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }]
+      responses: { "200": { description: Sayfalı liste } }
+  /api/v1/sensors/health:
+    get:
+      tags: [sensors]
+      summary: Pil ve bağlantı sağlığı raporu
+      x-permission: sensors:read
+      responses: { "200": { description: Rapor } }
+  /api/v1/sensors/{id}:
+    get:
+      tags: [sensors]
+      summary: Sensör
+      x-permission: sensors:read
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses: { "200": { description: Sensör } }
+  /api/v1/sensors/{id}/readings:
+    get:
+      tags: [sensors]
+      summary: Zaman serisi. Varsayılan son 24 saat; çözünürlük aralığa göre otomatik seçilir (raw ≤3 sa, 1m ≤48 sa, 15m ≤30 gün, 1h).
+      x-permission: sensors:read
+      parameters: [{ $ref: "#/components/parameters/ID" }, { $ref: "#/components/parameters/From" }, { $ref: "#/components/parameters/To" }, { $ref: "#/components/parameters/Resolution" }]
+      responses: { "200": { description: "{resolution, points:[{ts, avg_c, min_c, max_c, humidity_pct, n}]}" } }
+  /api/v1/sensors/{id}/evaluation:
+    get:
+      tags: [sensors]
+      summary: Tek sensör serisini bir ürünün kurallarıyla değerlendirir; boşluk politikası karşılaştırması için policy parametresi
+      x-permission: sensors:read
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - { name: product_id, in: query, required: true, schema: { type: integer } }
+        - { name: policy, in: query, schema: { type: string, enum: [uncertain, interpolate] } }
+        - { name: hours, in: query, schema: { type: integer, minimum: 1, maximum: 168, default: 24 } }
+      responses: { "200": { description: Değerlendirme } }
+  /api/v1/timeseries/stats:
+    get:
+      tags: [sensors]
+      summary: Partisyonlar, özet su seviyeleri (watermark), saklama politikası
+      x-permission: sensors:read
+      responses: { "200": { description: İstatistik } }
+
+  /api/v1/alarms:
+    get:
+      tags: [alarms]
+      summary: Alarmlar (status=open|acknowledged|closed|live, rule, lot_id)
+      x-permission: alarms:read
+      parameters: [{ $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }]
+      responses: { "200": { description: Sayfalı liste } }
+  /api/v1/alarms/{id}/ack:
+    post:
+      tags: [alarms]
+      summary: Alarmı onayla (eskalasyon durur)
+      x-permission: alarms:handle
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses: { "200": { description: Alarm }, "409": { $ref: "#/components/responses/Error" } }
+  /api/v1/alarms/{id}/close:
+    post:
+      tags: [alarms]
+      summary: Alarmı kapat
+      x-permission: alarms:handle
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses: { "200": { description: Alarm } }
+  /api/v1/nonconformities:
+    get:
+      tags: [alarms]
+      summary: Uygunsuzluklar
+      x-permission: alarms:read
+      responses: { "200": { description: Sayfalı liste } }
+    post:
+      tags: [alarms]
+      summary: Uygunsuzluk aç; serbest bırakılmış parti beklemeye alınır
+      x-permission: alarms:handle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lot_id, description]
+              properties: { lot_id: { type: integer }, alarm_id: { type: integer }, description: { type: string } }
+      responses: { "201": { description: Oluşturuldu } }
+
+  /api/v1/haccp/checklists:
+    get:
+      tags: [haccp]
+      summary: HACCP kontrol listeleri ve CCP maddeleri
+      x-permission: haccp:read
+      responses: { "200": { description: Listeler } }
+  /api/v1/haccp/records:
+    get:
+      tags: [haccp]
+      summary: Doldurulmuş kontrol listeleri
+      x-permission: haccp:read
+      responses: { "200": { description: Sayfalı liste } }
+    post:
+      tags: [haccp]
+      summary: Kontrol listesi kaydı; başarısız madde düzeltici faaliyet ister
+      x-permission: haccp:record
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [checklist_id, location_id, answers]
+              properties:
+                checklist_id: { type: integer }
+                location_id: { type: integer }
+                notes: { type: string }
+                answers:
+                  type: array
+                  items:
+                    type: object
+                    required: [item_id]
+                    properties:
+                      item_id: { type: integer }
+                      bool_value: { type: boolean }
+                      temp_cc: { type: integer }
+                      corrective_action: { type: string }
+      responses: { "201": { description: Kaydedildi }, "422": { $ref: "#/components/responses/Error" } }
+
+  /api/v1/shipments:
+    get:
+      tags: [shipments]
+      summary: Sevkiyatlar
+      x-permission: shipments:read
+      responses: { "200": { description: Sayfalı liste } }
+    post:
+      tags: [shipments]
+      summary: Sevkiyat oluştur
+      x-permission: shipments:plan
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vehicle_id, customer_id, origin_id, planned_departure, transit_minutes]
+              properties:
+                vehicle_id: { type: integer }
+                customer_id: { type: integer }
+                origin_id: { type: integer }
+                planned_departure: { type: string, format: date-time }
+                transit_minutes: { type: integer }
+      responses: { "201": { description: Oluşturuldu } }
+  /api/v1/shipments/{id}:
+    get:
+      tags: [shipments]
+      summary: Sevkiyat ve paletleri
+      x-permission: shipments:read
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses: { "200": { description: Sevkiyat } }
+  /api/v1/shipments/{id}/plan:
+    post:
+      tags: [shipments]
+      summary: FEFO + kapasite kısıtlı (sırt çantası) yükleme önerisi; hiçbir şeyi değiştirmez
+      x-permission: shipments:plan
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                lines: { type: array, items: { type: object, properties: { product_id: { type: integer }, quantity: { type: integer } } } }
+                safety_margin_hours: { type: number, default: 24 }
+      responses: { "200": { description: "Satır başına selected / rejected (gerekçeli)" } }
+  /api/v1/shipments/{id}/load:
+    post:
+      tags: [shipments]
+      summary: Paletleri araca yükle (kilitli; kapasite, parti durumu ve raf ömrü yeniden kontrol edilir)
+      x-permission: shipments:plan
+      parameters: [{ $ref: "#/components/parameters/ID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [unit_ids], properties: { unit_ids: { type: array, items: { type: integer } } } }
+      responses: { "200": { description: Yüklendi }, "409": { $ref: "#/components/responses/Error" } }
+  /api/v1/shipments/{id}/depart:
+    post:
+      tags: [shipments]
+      summary: Yola çıkış
+      x-permission: shipments:plan
+      parameters: [{ $ref: "#/components/parameters/ID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses: { "200": { description: Yolda } }
+
+  /api/v1/driver/shipments:
+    get:
+      tags: [driver]
+      summary: Şoförün araçlarındaki sevkiyatlar
+      x-permission: driver:app
+      responses: { "200": { description: Liste } }
+  /api/v1/driver/sync:
+    post:
+      tags: [driver]
+      summary: Çevrimdışı toplanan teslimat ve sıcaklık olaylarını uygular (client_event_id ile idempotent)
+      x-permission: driver:app
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [events]
+              properties:
+                events:
+                  type: array
+                  items:
+                    type: object
+                    required: [client_event_id, shipment_id, kind, recorded_at]
+                    properties:
+                      client_event_id: { type: string, format: uuid }
+                      shipment_id: { type: integer }
+                      kind: { type: string, enum: [delivery, temperature_check] }
+                      recorded_at: { type: string, format: date-time }
+                      temp_cc: { type: integer }
+                      receiver_name: { type: string }
+                      note: { type: string }
+      responses: { "200": { description: "Olay başına outcome: applied | already_synced | duplicate_delivery | rejected" } }
+
+  /api/v1/trace/units/{id}:
+    get:
+      tags: [trace]
+      summary: Paletin geriye izi (ataları, lokasyonlar, sıcaklık özeti) ve ileri izi
+      x-permission: trace:read
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses: { "200": { description: İz } }
+  /api/v1/trace/lots/{id}:
+    get:
+      tags: [trace]
+      summary: Partinin ileri izi (recursive CTE) — palet, araç, müşteri
+      x-permission: trace:read
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses: { "200": { description: "İz + query_ms" } }
+  /api/v1/recalls:
+    get:
+      tags: [trace]
+      summary: Geri çağırmalar
+      x-permission: trace:read
+      responses: { "200": { description: Sayfalı liste } }
+    post:
+      tags: [trace]
+      summary: Geri çağırma başlat
+      x-permission: recall:create
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [lot_id, reason], properties: { lot_id: { type: integer }, reason: { type: string } } }
+      responses: { "201": { description: Etkilenen palet ve müşteriler }, "409": { $ref: "#/components/responses/Error" } }
+  /api/v1/recalls/{id}:
+    get:
+      tags: [trace]
+      summary: Geri çağırma ayrıntısı
+      x-permission: trace:read
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses: { "200": { description: Geri çağırma } }
+
+  /api/v1/customer/shipments:
+    get:
+      tags: [customer]
+      summary: Müşterinin kendi sevkiyatları
+      x-permission: customer:portal
+      responses: { "200": { description: Sayfalı liste } }
+  /api/v1/customer/shipments/{id}:
+    get:
+      tags: [customer]
+      summary: Sevkiyat sıcaklık sertifikası (başka müşterinin sevkiyatı 404)
+      x-permission: customer:portal
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses: { "200": { description: Sertifika }, "404": { $ref: "#/components/responses/Error" } }
+
+  /api/v1/audit:
+    get:
+      tags: [audit]
+      summary: Eklemeli denetim kaydı (entity, entity_id filtreleri)
+      x-permission: audit:read
+      parameters: [{ $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }]
+      responses: { "200": { description: Sayfalı liste } }
+
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    ID: { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+    Cursor: { name: cursor, in: query, schema: { type: string }, description: önceki yanıttaki next_cursor }
+    From: { name: from, in: query, schema: { type: string, format: date-time } }
+    To: { name: to, in: query, schema: { type: string, format: date-time } }
+    Resolution: { name: resolution, in: query, schema: { type: string, enum: [auto, raw, 1m, 15m, 1h], default: auto } }
+    IdempotencyKey: { name: Idempotency-Key, in: header, required: false, schema: { type: string, minLength: 8, maxLength: 128 } }
+  requestBodies:
+    RefreshToken:
+      required: true
+      content:
+        application/json:
+          schema: { type: object, required: [refresh_token], properties: { refresh_token: { type: string } } }
+  responses:
+    Error:
+      description: Hata
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Tokens:
+      description: Tokenlar
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              access_token: { type: string }
+              token_type: { type: string, example: Bearer }
+              expires_at: { type: string, format: date-time }
+              refresh_token: { type: string }
+              user: { $ref: "#/components/schemas/User" }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: validation_failed }
+            message: { type: string }
+            details: { type: object, additionalProperties: true }
+    Health:
+      type: object
+      properties:
+        status: { type: string, example: ok }
+        database: { type: string, example: ok }
+        migration_version: { type: integer }
+        ingest_buffered: { type: integer }
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        email: { type: string }
+        full_name: { type: string }
+        role: { type: string, enum: [warehouse_operator, driver, quality_manager, operations_manager, customer, auditor] }
+        customer_id: { type: integer, nullable: true }
+        permissions: { type: array, items: { type: string } }
+    Product:
+      type: object
+      required: [sku, name, temp_min_cc, temp_max_cc, window_s, shelf_life_h, unit_weight_g]
+      properties:
+        sku: { type: string }
+        name: { type: string }
+        temp_min_cc: { type: integer }
+        temp_max_cc: { type: integer }
+        max_cumulative_excursion_s: { type: integer }
+        window_s: { type: integer }
+        window_max_excursion_s: { type: integer }
+        shelf_life_h: { type: integer }
+        activation_energy_j_mol: { type: integer, default: 83144 }
+        gap_policy: { type: string, enum: [uncertain, interpolate] }
+        max_gap_s: { type: integer, default: 120 }
+        unit_weight_g: { type: integer }
+        list_price_kurus: { type: integer }

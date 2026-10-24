@@ -1,0 +1,120 @@
+name: sogukzincir
+
+x-backend: &backend
+  image: sogukzincir-backend:local
+  build: ./backend
+  env_file: .env
+  networks: [internal]
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    # larger WAL budget so the 24 h backfill does not checkpoint constantly
+    command: ["postgres", "-c", "max_wal_size=4GB", "-c", "shared_buffers=256MB", "-c", "work_mem=16MB"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    networks: [internal]
+    # not published: only reachable inside the compose network
+
+  # one-shot: migrations + deterministic seed (skipped if already seeded)
+  migrate:
+    <<: *backend
+    command: ["migrate"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  backend:
+    <<: *backend
+    command: ["serve"]
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/app/api", "healthcheck"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+      start_period: 5s
+
+  simulator:
+    <<: *backend
+    entrypoint: ["/app/simulator"]
+    command: []
+    environment:
+      API_URL: http://backend:8080
+      HEALTH_FILE: /tmp/simulator-alive
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/simulator", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+  frontend:
+    build: ./frontend
+    image: sogukzincir-frontend:local
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+
+  # docker compose --profile verify run --rm verify
+  verify:
+    <<: *backend
+    profiles: [verify]
+    entrypoint: ["/app/verify"]
+    command: []
+    environment:
+      API_URL: http://backend:8080
+      FRONTEND_URL: http://frontend:3000
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # docker compose --profile load run --rm k6
+  k6:
+    image: grafana/k6:0.54.0
+    profiles: [load]
+    volumes:
+      - ./load:/scripts:ro
+    environment:
+      API_URL: http://backend:8080
+    entrypoint: ["k6", "run", "--summary-export=/scripts/results/summary.json", "/scripts/k6.js"]
+    networks: [internal]
+    depends_on:
+      backend:
+        condition: service_healthy
+
+networks:
+  internal:
+
+volumes:
+  pgdata:

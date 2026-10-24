@@ -201,30 +201,47 @@ func (e *Evaluator) SensorPass(ctx context.Context) error {
 		}
 		res := excursion.Evaluate(sr.rs, rules, now)
 		last := sr.rs[len(sr.rs)-1]
-		peak := res.PeakCC
-		if now.Sub(last.TS) <= rules.MaxGap {
-			if last.TempCC > rules.MaxCC {
-				a := base
-				a.key, a.rule, a.peakCC = key(excursion.RuleLimitHigh), excursion.RuleLimitHigh, &peak
-				a.excursionS = int(res.HighDuration.Seconds())
-				a.message = fmt.Sprintf("%s: %.2f °C above the %.1f °C limit for %s", sr.code, float64(last.TempCC)/100, float64(rules.MaxCC)/100, p.Name)
-				out = append(out, a)
+		// Limits are checked on every reading since the previous pass (plus
+		// the gap tolerance), not only the latest one: a short spike between
+		// two passes must still raise an alarm.
+		recent := now.Add(-e.s.cfg.EvalInterval - rules.MaxGap)
+		var high, low *excursion.Reading
+		for i := range sr.rs {
+			rd := &sr.rs[i]
+			if rd.TS.Before(recent) {
+				continue
 			}
-			if last.TempCC < rules.MinCC {
-				low := res.MinCC
-				a := base
-				a.key, a.rule, a.peakCC = key(excursion.RuleLimitLow), excursion.RuleLimitLow, &low
-				a.excursionS = int(res.LowDuration.Seconds())
-				a.message = fmt.Sprintf("%s: %.2f °C below the %.1f °C limit for %s", sr.code, float64(last.TempCC)/100, float64(rules.MinCC)/100, p.Name)
-				out = append(out, a)
+			if rd.TempCC > rules.MaxCC && (high == nil || rd.TempCC > high.TempCC) {
+				high = rd
 			}
-		} else {
+			if rd.TempCC < rules.MinCC && (low == nil || rd.TempCC < low.TempCC) {
+				low = rd
+			}
+		}
+		if high != nil {
+			peak := high.TempCC
+			a := base
+			a.key, a.rule, a.peakCC = key(excursion.RuleLimitHigh), excursion.RuleLimitHigh, &peak
+			a.excursionS = int(res.HighDuration.Seconds())
+			a.message = fmt.Sprintf("%s: %.2f °C above the %.1f °C limit for %s", sr.code, float64(peak)/100, float64(rules.MaxCC)/100, p.Name)
+			out = append(out, a)
+		}
+		if low != nil {
+			v := low.TempCC
+			a := base
+			a.key, a.rule, a.peakCC = key(excursion.RuleLimitLow), excursion.RuleLimitLow, &v
+			a.excursionS = int(res.LowDuration.Seconds())
+			a.message = fmt.Sprintf("%s: %.2f °C below the %.1f °C limit for %s", sr.code, float64(v)/100, float64(rules.MinCC)/100, p.Name)
+			out = append(out, a)
+		}
+		if now.Sub(last.TS) > rules.MaxGap {
 			a := base
 			a.key, a.rule = key(excursion.RuleGap), excursion.RuleGap
 			a.excursionS = int(now.Sub(last.TS).Seconds())
 			a.message = fmt.Sprintf("%s: silent since %s", sr.code, last.TS.UTC().Format(time.RFC3339))
 			out = append(out, a)
 		}
+		peak := res.PeakCC
 		if res.Breached(excursion.RuleWindow) {
 			a := base
 			a.key, a.rule, a.peakCC = key(excursion.RuleWindow), excursion.RuleWindow, &peak

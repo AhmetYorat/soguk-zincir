@@ -157,8 +157,10 @@ func (s *Server) Routes() http.Handler {
 
 			get(auth.PermSensorsRead, "/sensors", s.listSensors)
 			get(auth.PermSensorsRead, "/sensors/health", s.sensorHealth)
+			get(auth.PermSensorsRead, "/timeseries/stats", s.timeseriesStats)
 			get(auth.PermSensorsRead, "/sensors/{id}", s.getSensor)
 			get(auth.PermSensorsRead, "/sensors/{id}/readings", s.sensorReadings)
+			get(auth.PermSensorsRead, "/sensors/{id}/evaluation", s.sensorEvaluation)
 			get(auth.PermSensorsRead, "/locations/{id}/readings", s.locationReadings)
 
 			get(auth.PermAlarmsRead, "/alarms", s.listAlarms)

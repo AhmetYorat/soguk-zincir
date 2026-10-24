@@ -5,12 +5,14 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/domain/devicesig"
+	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/domain/excursion"
 	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/httpx"
 	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/ingest"
 )
@@ -146,7 +148,7 @@ func (s *Server) listSensors(w http.ResponseWriter, r *http.Request) error {
 	}
 	q := r.URL.Query()
 	rows, err := s.pool.Query(r.Context(), sensorSelect+`
-		WHERE s.id < $1 AND ($2 = '' OR l.kind::text = $2) AND ($3 = '' OR s.code ILIKE '%' || $3 || '%' OR l.name ILIKE '%' || $3 || '%')
+		WHERE s.id < $1::bigint AND ($2 = '' OR l.kind::text = $2) AND ($3 = '' OR s.code ILIKE '%' || $3 || '%' OR l.name ILIKE '%' || $3 || '%')
 		ORDER BY s.id DESC LIMIT $4`, page.MaxID(), q.Get("kind"), q.Get("q"), page.Limit)
 	if err != nil {
 		return err
@@ -353,6 +355,101 @@ func (s *Server) liveStats(w http.ResponseWriter, r *http.Request) error {
 		"shipments_in_transit": inTransit,
 		"last_reading_at":      lastReading,
 		"server_time":          s.now().UTC(),
+	})
+	return nil
+}
+
+// timeseriesStats shows partitions, rollup watermarks and sizes (T-2 evidence).
+func (s *Server) timeseriesStats(w http.ResponseWriter, r *http.Request) error {
+	type part struct {
+		Table     string `json:"table"`
+		Partition string `json:"partition"`
+		Bounds    string `json:"bounds"`
+		EstRows   int64  `json:"estimated_rows"`
+		SizeBytes int64  `json:"size_bytes"`
+	}
+	rows, err := s.pool.Query(r.Context(), `
+		SELECT p.relname, c.relname, pg_get_expr(c.relpartbound, c.oid), greatest(c.reltuples, 0)::bigint,
+		       pg_total_relation_size(c.oid)
+		FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid JOIN pg_class p ON p.oid = i.inhparent
+		WHERE p.relname IN ('readings', 'readings_1m', 'readings_15m', 'readings_1h')
+		ORDER BY p.relname, c.relname`)
+	if err != nil {
+		return err
+	}
+	parts, err := pgx.CollectRows(rows, pgx.RowToStructByPos[part])
+	if err != nil {
+		return err
+	}
+	type wm struct {
+		Level string    `json:"level"`
+		Upto  time.Time `json:"upto"`
+	}
+	rows, err = s.pool.Query(r.Context(), `SELECT level, upto FROM rollup_watermarks ORDER BY upto`)
+	if err != nil {
+		return err
+	}
+	wms, err := pgx.CollectRows(rows, pgx.RowToStructByPos[wm])
+	if err != nil {
+		return err
+	}
+	var last24h int64
+	if err := s.pool.QueryRow(r.Context(), `SELECT count(*) FROM readings WHERE ts > now() - interval '24 hours'`).Scan(&last24h); err != nil {
+		return err
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"partitions": parts, "watermarks": wms, "raw_rows_last_24h": last24h,
+		"retention": map[string]string{"raw": s.cfg.RawRetention.String(), "1m": "720h", "15m": "4320h", "1h": "17520h"},
+	})
+	return nil
+}
+
+// sensorEvaluation runs the excursion engine on one sensor's raw series
+// against a product's rules. Useful to compare gap policies on the same data:
+// ?product_id=…&policy=uncertain|interpolate&hours=24.
+func (s *Server) sensorEvaluation(w http.ResponseWriter, r *http.Request) error {
+	id, err := httpx.PathID(chi.URLParam(r, "id"))
+	if err != nil {
+		return err
+	}
+	q := r.URL.Query()
+	pid, err := httpx.PathID(q.Get("product_id"))
+	if err != nil {
+		return httpx.Validation{"product_id": "is required"}.Err()
+	}
+	product, err := loadProduct(r.Context(), s.pool, pid)
+	if err != nil {
+		return err
+	}
+	switch q.Get("policy") {
+	case "":
+	case "uncertain", "interpolate":
+		product.GapPolicy = q.Get("policy")
+	default:
+		return httpx.Validation{"policy": "must be uncertain or interpolate"}.Err()
+	}
+	hours := 24
+	if h := q.Get("hours"); h != "" {
+		if hours, err = strconv.Atoi(h); err != nil || hours < 1 || hours > 168 {
+			return httpx.Validation{"hours": "must be 1-168"}.Err()
+		}
+	}
+	now := s.now()
+	rows, err := s.pool.Query(r.Context(), `SELECT ts, temp_cc FROM readings WHERE sensor_id = $1 AND ts >= $2 ORDER BY ts`,
+		id, now.Add(-time.Duration(hours)*time.Hour))
+	if err != nil {
+		return err
+	}
+	rs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (excursion.Reading, error) {
+		var rd excursion.Reading
+		return rd, row.Scan(&rd.TS, &rd.TempCC)
+	})
+	if err != nil {
+		return err
+	}
+	res := excursion.Evaluate(rs, product.Rules(), now)
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"sensor_id": id, "product": product.SKU, "readings": len(rs), "evaluation": summarise(res, product),
 	})
 	return nil
 }

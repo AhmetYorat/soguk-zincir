@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/auth"
 	"github.com/AhmetYorat/ddo-case-ahmet-dervis-yorat/backend/internal/db"
@@ -729,6 +730,16 @@ func (s *seeder) shipments() error {
 	}
 	// planned shipments from the busiest chilled rooms, ready for FEFO planning
 	chilled := s.stockRooms(false)
+	// FEFO demo in the first planned shipment's room: ready meals (72 h shelf
+	// life) with 12, 40, 52 and 64 hours left. With 3 h transit + 24 h margin
+	// the first must be refused and the others picked oldest first.
+	ready := len(products) - 1
+	for k, hoursLeft := range []int{12, 40, 52, 64} {
+		age := time.Duration(products[ready].shelfH-hoursLeft) * time.Hour
+		if _, _, err := s.createLot(fmt.Sprintf("LOT-FEFO-%d", k+1), ready, chilled[0], s.now.Add(-age), []int{240, 240}); err != nil {
+			return err
+		}
+	}
 	for k := 0; k < 6 && k < len(chilled); k++ {
 		if _, err := s.shipment(5+k, 2+k, s.roomIdx[chilled[k]], "planned", s.now.Add(time.Duration(2+k)*time.Hour),
 			time.Duration(3+k)*time.Hour); err != nil {
@@ -831,10 +842,14 @@ func (s *seeder) readings(pool *pgxpool.Pool) error {
 	if r := s.stockRooms(false); len(r) > 1 {
 		hotRoom = s.layout.Rooms[r[1]].Code
 	}
-	// One statement per hour-slice keeps each transaction small.
+	// One statement per hour-slice keeps transactions small; slices are
+	// independent, so a few run in parallel.
+	g, gctx := errgroup.WithContext(s.ctx)
+	g.SetLimit(4)
 	for h := 0; h < hours; h++ {
 		sliceFrom := from.Add(time.Duration(h) * time.Hour)
-		_, err := pool.Exec(s.ctx, `
+		g.Go(func() error {
+			_, err := pool.Exec(gctx, `
 			WITH sens AS (
 			    SELECT s.id AS sid, l.code AS loc, l.id AS lid, (l.name LIKE 'Donuk%') AS frozen,
 			           abs(hashtextextended($1 || ':spike:' || l.id, 0)) AS hs,
@@ -858,12 +873,24 @@ func (s *seeder) readings(pool *pgxpool.Pool) error {
 			-- outages: one sensor in 60 is silent for 20 minutes
 			WHERE NOT (hg % 60 = 0 AND i BETWEEN (hg / 60) % ($4 * 120) AND (hg / 60) % ($4 * 120) + 40)
 			ON CONFLICT DO NOTHING`,
-			fmt.Sprint(s.opt.Seed), from, sliceFrom, hours, hotRoom, s.now.Add(-6*time.Hour))
-		if err != nil {
+				fmt.Sprint(s.opt.Seed), from, sliceFrom, hours, hotRoom, s.now.Add(-6*time.Hour))
 			return err
-		}
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return err
 	}
 	if _, err := pool.Exec(s.ctx, `UPDATE sensors s SET last_seen_at = (SELECT max(ts) FROM readings r WHERE r.sensor_id = s.id)`); err != nil {
+		return err
+	}
+	// The hot-room excursion happened six hours ago and nobody acknowledged
+	// the alarm; the escalation job raises it as soon as the API starts.
+	if _, err := pool.Exec(s.ctx, `
+		INSERT INTO alarms (dedup_key, sensor_id, location_id, rule, peak_cc, excursion_s, message, opened_at, last_seen_at)
+		SELECT 'seed:hot-room:' || s.id, s.id, l.id, 'limit_high', 1150, 3000,
+		       s.code || ': door left open, about 11 °C for 50 minutes', $2::timestamptz, $2::timestamptz + interval '50 minutes'
+		FROM sensors s JOIN locations l ON l.id = s.location_id WHERE l.code = $1 ORDER BY s.id LIMIT 1`,
+		hotRoom, s.now.Add(-6*time.Hour)); err != nil {
 		return err
 	}
 	s.opt.Log.Info("backfilled readings", "hours", hours, "sensors", len(s.layout.Sensors), "duration_ms", time.Since(start).Milliseconds())
