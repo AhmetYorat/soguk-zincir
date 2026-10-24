@@ -128,3 +128,65 @@ func parsePartition(table, name string, monthly bool) (time.Time, bool) {
 	t, err := time.ParseInLocation(layout, suffix, time.UTC)
 	return t, err == nil
 }
+
+// CompactPartitions rewrites closed daily partitions of readings and
+// readings_1m in primary-key order (CLUSTER), so the 24-hour series of one
+// sensor sits on a few dozen pages instead of thousands. A partition is
+// closed once late data can no longer arrive: devices may send a backlog of
+// up to `lateness`. CLUSTER locks the partition for its duration (seconds
+// for a day of data), so at most `limit` partitions are done per run.
+func CompactPartitions(ctx context.Context, pool *pgxpool.Pool, now time.Time, lateness time.Duration, limit int, log *slog.Logger) error {
+	for _, table := range []string{"readings", "readings_1m"} {
+		rows, err := pool.Query(ctx, `
+			SELECT c.relname FROM pg_inherits i
+			JOIN pg_class c ON c.oid = i.inhrelid
+			JOIN pg_class p ON p.oid = i.inhparent
+			WHERE p.relname = $1
+			  AND NOT EXISTS (SELECT 1 FROM partition_compactions pc WHERE pc.partition = c.relname)
+			ORDER BY c.relname`, table)
+		if err != nil {
+			return err
+		}
+		names, err := collectStrings(rows)
+		if err != nil {
+			return err
+		}
+		for _, n := range names {
+			start, ok := parsePartition(table, n, false)
+			if !ok || next(start, false).Add(lateness).After(now) {
+				continue
+			}
+			if limit == 0 {
+				return nil
+			}
+			limit--
+			began := time.Now()
+			if _, err := pool.Exec(ctx, fmt.Sprintf("CLUSTER %s USING %s_pkey", n, n)); err != nil {
+				return fmt.Errorf("cluster %s: %w", n, err)
+			}
+			if _, err := pool.Exec(ctx, "ANALYZE "+n); err != nil {
+				return err
+			}
+			ms := time.Since(began).Milliseconds()
+			if _, err := pool.Exec(ctx, `INSERT INTO partition_compactions (partition, duration_ms) VALUES ($1, $2)
+				ON CONFLICT (partition) DO NOTHING`, n, ms); err != nil {
+				return err
+			}
+			log.Info("compacted partition", "partition", n, "duration_ms", ms)
+		}
+	}
+	return nil
+}
+
+// MarkCompacted records partitions whose data was written already in key
+// order (the seed backfill), so they are not rewritten again.
+func MarkCompacted(ctx context.Context, pool *pgxpool.Pool, before time.Time) error {
+	_, err := pool.Exec(ctx, `
+		INSERT INTO partition_compactions (partition, duration_ms)
+		SELECT c.relname, 0 FROM pg_inherits i
+		JOIN pg_class c ON c.oid = i.inhrelid JOIN pg_class p ON p.oid = i.inhparent
+		WHERE p.relname IN ('readings', 'readings_1m')
+		  AND to_date(substring(c.relname from '_p(\d{8})$'), 'YYYYMMDD') + 1 <= $1::date
+		ON CONFLICT DO NOTHING`, before)
+	return err
+}

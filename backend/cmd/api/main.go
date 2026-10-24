@@ -128,7 +128,11 @@ func serve(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	done := make(chan struct{})
 	go func() { pipe.Run(bg); close(done) }()
 	go jobs.Loop(bg, log, "partitions", time.Hour, func(ctx context.Context) error {
-		return db.MaintainPartitions(ctx, pool, time.Now(), 24*time.Hour, db.DefaultRetention(cfg.RawRetention), log)
+		if err := db.MaintainPartitions(ctx, pool, time.Now(), 24*time.Hour, db.DefaultRetention(cfg.RawRetention), log); err != nil {
+			return err
+		}
+		// closed days: devices may still send a backlog for up to 6 h after midnight
+		return db.CompactPartitions(ctx, pool, time.Now(), 7*time.Hour, 2, log)
 	})
 	go jobs.Loop(bg, log, "rollup", 30*time.Second, func(ctx context.Context) error {
 		return jobs.Rollup(ctx, pool, time.Now(), pipe.TakeDirty())

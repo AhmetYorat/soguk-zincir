@@ -167,9 +167,24 @@ func Run(ctx context.Context, pool *pgxpool.Pool, opt Options) error {
 	if err := s.readings(pool); err != nil {
 		return fmt.Errorf("seed readings: %w", err)
 	}
-	from := s.now.Add(-time.Duration(opt.BackfillHours) * time.Hour)
-	if err := jobs.Rollup(ctx, pool, s.now, &from); err != nil {
+	// 1-minute buckets were built with the backfill; 15 min and 1 h follow
+	// from them in one pass
+	err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SET LOCAL work_mem = '256MB'`); err != nil {
+			return err
+		}
+		if err := jobs.SetWatermark(ctx, tx, "1m", s.now); err != nil {
+			return err
+		}
+		return jobs.Rollup(ctx, tx, s.now, nil)
+	})
+	if err != nil {
 		return fmt.Errorf("seed rollups: %w", err)
+	}
+	// backfilled days were written in key order already; only days that
+	// later receive live data need compaction
+	if err := db.MarkCompacted(ctx, pool, s.now.Truncate(24*time.Hour)); err != nil {
+		return err
 	}
 	if _, err := pool.Exec(ctx, `ANALYZE`); err != nil {
 		return err
@@ -837,44 +852,43 @@ func (s *seeder) readings(pool *pgxpool.Pool) error {
 		return nil
 	}
 	start := time.Now()
-	from := s.now.Add(-time.Duration(hours) * time.Hour)
+	// minute-aligned so every hour slice owns whole 1-minute buckets
+	from := s.now.Truncate(time.Minute).Add(-time.Duration(hours) * time.Hour)
 	hotRoom := s.layout.Rooms[0].Code
 	if r := s.stockRooms(false); len(r) > 1 {
 		hotRoom = s.layout.Rooms[r[1]].Code
 	}
-	// One statement per hour-slice keeps transactions small; slices are
-	// independent, so a few run in parallel.
+	var super bool
+	if err := pool.QueryRow(s.ctx, `SELECT rolsuper FROM pg_roles WHERE rolname = current_user`).Scan(&super); err != nil {
+		return err
+	}
+	// One transaction per hour slice keeps them small; slices are
+	// independent, so a few run in parallel. Each slice also builds its
+	// 1-minute buckets, which is cheaper than one pass over 5.76 M rows later.
 	g, gctx := errgroup.WithContext(s.ctx)
 	g.SetLimit(4)
 	for h := 0; h < hours; h++ {
 		sliceFrom := from.Add(time.Duration(h) * time.Hour)
 		g.Go(func() error {
-			_, err := pool.Exec(gctx, `
-			WITH sens AS (
-			    SELECT s.id AS sid, l.code AS loc, l.id AS lid, (l.name LIKE 'Donuk%') AS frozen,
-			           abs(hashtextextended($1 || ':spike:' || l.id, 0)) AS hs,
-			           abs(hashtextextended($1 || ':gap:' || s.id, 0)) AS hg
-			    FROM sensors s JOIN locations l ON l.id = s.location_id
-			), g AS (
-			    SELECT sens.*, ts, (extract(epoch FROM ts - $2::timestamptz) / 30)::int AS i
-			    FROM sens, generate_series($3::timestamptz, $3::timestamptz + interval '1 hour' - interval '30 seconds', interval '30 seconds') AS ts
-			)
-			INSERT INTO readings (sensor_id, ts, temp_cc, humidity_pm)
-			SELECT sid, ts,
-			    (`+BaseTempSQL+`
-			     + (abs(hashtextextended($1 || ':' || sid || ':' || i, 0)) % 81) - 40
-			     -- door-open spike: one in 12 rooms/vehicles, 8-28 minutes at about +7 °C
-			     + CASE WHEN hs % 12 = 0 AND i BETWEEN (hs / 12) % ($4 * 120) AND (hs / 12) % ($4 * 120) + 16 + hs % 40 THEN 700 ELSE 0 END
-			     -- the demo hot room: a 50-minute excursion 6 hours ago
-			     + CASE WHEN loc = $5 AND ts >= $6::timestamptz AND ts < $6::timestamptz + interval '50 minutes' THEN 800 ELSE 0 END
-			    )::smallint,
-			    (CASE WHEN frozen THEN 600 ELSE 850 END + (abs(hashtextextended($1 || ':h:' || sid || ':' || i, 0)) % 61) - 30)::smallint
-			FROM g
-			-- outages: one sensor in 60 is silent for 20 minutes
-			WHERE NOT (hg % 60 = 0 AND i BETWEEN (hg / 60) % ($4 * 120) AND (hg / 60) % ($4 * 120) + 40)
-			ON CONFLICT DO NOTHING`,
-				fmt.Sprint(s.opt.Seed), from, sliceFrom, hours, hotRoom, s.now.Add(-6*time.Hour))
-			return err
+			return pgx.BeginFunc(gctx, pool, func(tx pgx.Tx) error {
+				// the 240 000-row sort must stay in memory (seed-only setting)
+				if _, err := tx.Exec(gctx, `SET LOCAL work_mem = '256MB'`); err != nil {
+					return err
+				}
+				// Sensor ids come from the sensors table itself, so the
+				// foreign key lookup per row (half of the insert time) is
+				// skipped for the backfill when the role is allowed to.
+				if super {
+					if _, err := tx.Exec(gctx, `SET LOCAL session_replication_role = replica`); err != nil {
+						return err
+					}
+				}
+				if _, err := tx.Exec(gctx, backfillSQL, fmt.Sprint(s.opt.Seed), from, sliceFrom, hours, hotRoom,
+					s.now.Add(-6*time.Hour)); err != nil {
+					return err
+				}
+				return jobs.RollupRange(gctx, tx, jobs.Levels[0], sliceFrom, sliceFrom.Add(time.Hour))
+			})
 		})
 	}
 	if err := g.Wait(); err != nil {
@@ -903,3 +917,34 @@ func maxTime(a, b time.Time) time.Time {
 	}
 	return b
 }
+
+// backfillSQL generates one hour of readings for every sensor. Noise,
+// door-open spikes and outages derive from hashtextextended(seed, …), so the
+// same seed always gives the same data. Rows are written in key order so one
+// sensor's readings share heap pages (see db.CompactPartitions).
+const backfillSQL = `
+		WITH sens AS (
+		    SELECT s.id AS sid, l.code AS loc, l.id AS lid, (l.name LIKE 'Donuk%') AS frozen,
+		           abs(hashtextextended($1 || ':spike:' || l.id, 0)) AS hs,
+		           abs(hashtextextended($1 || ':gap:' || s.id, 0)) AS hg
+		    FROM sensors s JOIN locations l ON l.id = s.location_id
+		), g AS (
+		    SELECT sens.*, ts, (extract(epoch FROM ts - $2::timestamptz) / 30)::int AS i
+		    FROM sens, generate_series($3::timestamptz, $3::timestamptz + interval '1 hour' - interval '30 seconds', interval '30 seconds') AS ts
+		)
+		INSERT INTO readings (sensor_id, ts, temp_cc, humidity_pm)
+		SELECT sid, ts,
+		    (` + BaseTempSQL + `
+		     + (abs(hashtextextended($1 || ':' || sid || ':' || i, 0)) % 81) - 40
+		     -- door-open spike: one in 12 rooms/vehicles, 8-28 minutes at about +7 °C
+		     + CASE WHEN hs % 12 = 0 AND i BETWEEN (hs / 12) % ($4 * 120) AND (hs / 12) % ($4 * 120) + 16 + hs % 40 THEN 700 ELSE 0 END
+		     -- the demo hot room: a 50-minute excursion 6 hours ago
+		     + CASE WHEN loc = $5 AND ts >= $6::timestamptz AND ts < $6::timestamptz + interval '50 minutes' THEN 800 ELSE 0 END
+		    )::smallint,
+		    (CASE WHEN frozen THEN 600 ELSE 850 END + (abs(hashtextextended($1 || ':h:' || sid || ':' || i, 0)) % 61) - 30)::smallint
+		FROM g
+		-- outages: one sensor in 60 is silent for 20 minutes
+		WHERE NOT (hg % 60 = 0 AND i BETWEEN (hg / 60) % ($4 * 120) AND (hg / 60) % ($4 * 120) + 40)
+		-- written in key order so each sensor's rows share heap pages
+		ORDER BY sid, ts
+		ON CONFLICT DO NOTHING`

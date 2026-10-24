@@ -691,12 +691,14 @@ func (r *runner) t1Excursion() {
 		for sid := 1; sid <= 400; sid++ {
 			u := q.get(fmt.Sprintf("/api/v1/sensors/%d/evaluation?product_id=1&policy=uncertain", sid))
 			ev := m(u.JSON()["evaluation"])
-			if len(arr(ev["gaps"])) == 0 {
+			// short gaps (e.g. the minutes between seeding and the simulator
+			// starting) are real but too small to compare policies on
+			if len(arr(ev["gaps"])) == 0 || num(ev["uncertain_s"]) < 600 {
 				continue
 			}
 			in := q.get(fmt.Sprintf("/api/v1/sensors/%d/evaluation?product_id=1&policy=interpolate", sid))
 			ei := m(in.JSON()["evaluation"])
-			if num(ev["uncertain_s"]) < 600 || num(ei["uncertain_s"]) != 0 || num(ev["cumulative_excursion_s"]) <= num(ei["cumulative_excursion_s"]) {
+			if num(ei["uncertain_s"]) != 0 || num(ev["cumulative_excursion_s"]) <= num(ei["cumulative_excursion_s"]) {
 				return fail("sensor %d: uncertain %.0f s / interpolate %.0f s", sid, num(ev["uncertain_s"]), num(ei["uncertain_s"]))
 			}
 			return pass("S%d: belirsiz %.0f dk sapma, doldurunca %.0f dk", sid, num(ev["cumulative_excursion_s"])/60, num(ei["cumulative_excursion_s"])/60)

@@ -14,7 +14,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     # larger WAL budget so the 24 h backfill does not checkpoint constantly
-    command: ["postgres", "-c", "max_wal_size=4GB", "-c", "shared_buffers=256MB", "-c", "work_mem=16MB"]
+    command: ["postgres", "-c", "max_wal_size=4GB", "-c", "shared_buffers=512MB", "-c", "work_mem=16MB"]
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

@@ -9,8 +9,15 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// DB is satisfied by *pgxpool.Pool and pgx.Tx, so the seed can run rollups
+// inside a transaction with a larger work_mem.
+type DB interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
 
 // Level describes one rollup step.
 type Level struct {
@@ -40,17 +47,33 @@ func (l Level) sql() string {
 		SELECT sensor_id, %s, %s, %s, %s, %s, %s
 		FROM %s WHERE %s >= $1 AND %s < $2
 		GROUP BY 1, 2
+		ORDER BY 1, 2
 		ON CONFLICT (sensor_id, bucket) DO UPDATE SET
 		    n = EXCLUDED.n, temp_min_cc = EXCLUDED.temp_min_cc, temp_max_cc = EXCLUDED.temp_max_cc,
 		    temp_sum_cc = EXCLUDED.temp_sum_cc, hum_sum_pm = EXCLUDED.hum_sum_pm`,
 		l.Name, l.bucketExpr, l.nExpr, l.minExpr, l.maxExpr, l.sumExpr, l.humExpr, l.Source, l.tsCol, l.tsCol)
 }
 
+// RollupRange computes one level for [from, to) without touching
+// watermarks. The seed uses it to build 1-minute buckets hour by hour in
+// parallel; from and to must be aligned to the level's width.
+func RollupRange(ctx context.Context, db DB, level Level, from, to time.Time) error {
+	_, err := db.Exec(ctx, level.sql(), from, to)
+	return err
+}
+
+// SetWatermark records that a level is complete up to `upto`.
+func SetWatermark(ctx context.Context, db DB, level string, upto time.Time) error {
+	_, err := db.Exec(ctx, `INSERT INTO rollup_watermarks (level, upto) VALUES ($1, $2)
+		ON CONFLICT (level) DO UPDATE SET upto = EXCLUDED.upto`, level, upto)
+	return err
+}
+
 // Rollup recomputes each level from its watermark (minus one bucket, to
 // absorb late readings) up to now. `dirtySince` forces recomputation from an
 // earlier time, e.g. when a device flushed a backlog after an outage.
 // Recomputing a bucket is idempotent because of the upsert.
-func Rollup(ctx context.Context, pool *pgxpool.Pool, now time.Time, dirtySince *time.Time) error {
+func Rollup(ctx context.Context, pool DB, now time.Time, dirtySince *time.Time) error {
 	var lowest *time.Time = dirtySince
 	for _, l := range Levels {
 		var wm time.Time

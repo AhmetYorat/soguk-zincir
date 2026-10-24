@@ -1,0 +1,432 @@
+# SoğukZincir — VS Code REST Client koleksiyonu
+# Önce "Giriş" bölümündeki istekleri çalıştırın; tokenlar değişkenlere alınır.
+# Parola tüm demo hesaplarında: Demo1234!
+
+@api = http://localhost:8080
+@json = application/json
+
+###############################################################################
+# Sistem
+###############################################################################
+
+### Sağlık (veritabanı dahil)
+GET {{api}}/health
+
+### Prometheus metrikleri
+GET {{api}}/metrics
+
+### OpenAPI
+GET {{api}}/openapi.yaml
+
+###############################################################################
+# Giriş — her rol
+###############################################################################
+
+# @name depo
+POST {{api}}/api/v1/auth/login
+Content-Type: {{json}}
+
+{"email": "depo@sogukzincir.test", "password": "Demo1234!"}
+
+###
+# @name kalite
+POST {{api}}/api/v1/auth/login
+Content-Type: {{json}}
+
+{"email": "kalite@sogukzincir.test", "password": "Demo1234!"}
+
+###
+# @name operasyon
+POST {{api}}/api/v1/auth/login
+Content-Type: {{json}}
+
+{"email": "operasyon@sogukzincir.test", "password": "Demo1234!"}
+
+###
+# @name sofor
+POST {{api}}/api/v1/auth/login
+Content-Type: {{json}}
+
+{"email": "sofor@sogukzincir.test", "password": "Demo1234!"}
+
+###
+# @name market
+POST {{api}}/api/v1/auth/login
+Content-Type: {{json}}
+
+{"email": "market@sogukzincir.test", "password": "Demo1234!"}
+
+###
+# @name denetci
+POST {{api}}/api/v1/auth/login
+Content-Type: {{json}}
+
+{"email": "denetci@sogukzincir.test", "password": "Demo1234!"}
+
+###
+@tDepo = {{depo.response.body.access_token}}
+@tKalite = {{kalite.response.body.access_token}}
+@tOps = {{operasyon.response.body.access_token}}
+@tSofor = {{sofor.response.body.access_token}}
+@tMarket = {{market.response.body.access_token}}
+@tDenetci = {{denetci.response.body.access_token}}
+
+### Yanlış parola → 401 invalid_credentials
+POST {{api}}/api/v1/auth/login
+Content-Type: {{json}}
+
+{"email": "kalite@sogukzincir.test", "password": "yanlis"}
+
+### Refresh token döndürme (aynı token ikinci kez → 401 ve aile iptali)
+POST {{api}}/api/v1/auth/refresh
+Content-Type: {{json}}
+
+{"refresh_token": "{{denetci.response.body.refresh_token}}"}
+
+### Oturumdaki kullanıcı ve izinleri
+GET {{api}}/api/v1/auth/me
+Authorization: Bearer {{tKalite}}
+
+### Çıkış (oturum ailesini iptal eder)
+POST {{api}}/api/v1/auth/logout
+Content-Type: {{json}}
+
+{"refresh_token": "{{market.response.body.refresh_token}}"}
+
+###############################################################################
+# Yetki ihlalleri (hepsi 403)
+###############################################################################
+
+### Şoför parti listesini göremez
+GET {{api}}/api/v1/lots
+Authorization: Bearer {{tSofor}}
+
+### Denetçi yazamaz
+POST {{api}}/api/v1/products
+Authorization: Bearer {{tDenetci}}
+Content-Type: {{json}}
+
+{"sku": "X"}
+
+### Depo operatörü kalite kararı veremez
+POST {{api}}/api/v1/lots/1/decisions
+Authorization: Bearer {{tDepo}}
+Content-Type: {{json}}
+
+{"decision": "accept", "reason": "deneme"}
+
+###############################################################################
+# F-1 Ürün ve parti
+###############################################################################
+
+### Ürünler
+GET {{api}}/api/v1/products
+Authorization: Bearer {{tDepo}}
+
+### Ürün oluştur
+POST {{api}}/api/v1/products
+Authorization: Bearer {{tDepo}}
+Content-Type: {{json}}
+
+{"sku": "AYR-1L", "name": "Ayran 1 L", "temp_min_cc": 200, "temp_max_cc": 800, "max_cumulative_excursion_s": 1800,
+ "window_s": 3600, "window_max_excursion_s": 600, "shelf_life_h": 240, "unit_weight_g": 1030, "list_price_kurus": 2990}
+
+### Ürün
+GET {{api}}/api/v1/products/1
+Authorization: Bearer {{tDepo}}
+
+### Partiler (status, q, product_id; keyset: cursor=next_cursor)
+GET {{api}}/api/v1/lots?limit=20&status=on_hold
+Authorization: Bearer {{tKalite}}
+
+### Parti kabulü (Idempotency-Key ile: aynı istek tekrar → aynı yanıt)
+POST {{api}}/api/v1/lots
+Authorization: Bearer {{tDepo}}
+Content-Type: {{json}}
+Idempotency-Key: demo-lot-0001
+
+{"code": "LOT-DEMO-0001", "product_id": 1, "location_id": 41, "produced_at": "2026-10-24T06:00:00Z", "pallets": [200, 180]}
+
+### Parti ve paletleri
+GET {{api}}/api/v1/lots/1
+Authorization: Bearer {{tKalite}}
+
+### Lokasyonlar / araçlar
+GET {{api}}/api/v1/locations?kind=cold_room
+Authorization: Bearer {{tOps}}
+
+###
+GET {{api}}/api/v1/vehicles
+Authorization: Bearer {{tOps}}
+
+### Paletler
+GET {{api}}/api/v1/units?status=active&limit=20
+Authorization: Bearer {{tDepo}}
+
+###
+GET {{api}}/api/v1/units/1
+Authorization: Bearer {{tDepo}}
+
+### Palet böl
+POST {{api}}/api/v1/units/1/split
+Authorization: Bearer {{tDepo}}
+Content-Type: {{json}}
+Idempotency-Key: demo-split-0001
+
+{"quantity": 20}
+
+### Paletleri birleştir (aynı lokasyon)
+POST {{api}}/api/v1/units/merge
+Authorization: Bearer {{tDepo}}
+Content-Type: {{json}}
+
+{"unit_ids": [2, 3]}
+
+### Paleti başka soğuk odaya taşı
+POST {{api}}/api/v1/units/4/move
+Authorization: Bearer {{tDepo}}
+Content-Type: {{json}}
+
+{"location_id": 42}
+
+###############################################################################
+# F-2 / T-2 Sensör verisi ve zaman serisi
+###############################################################################
+
+### Canlı sayaçlar
+GET {{api}}/api/v1/live
+Authorization: Bearer {{tOps}}
+
+### Sensörler
+GET {{api}}/api/v1/sensors?kind=vehicle&limit=20
+Authorization: Bearer {{tKalite}}
+
+###
+GET {{api}}/api/v1/sensors/1
+Authorization: Bearer {{tKalite}}
+
+### Son 24 saat (otomatik çözünürlük: 1m)
+GET {{api}}/api/v1/sensors/1/readings
+Authorization: Bearer {{tKalite}}
+
+### Son 24 saat ham
+GET {{api}}/api/v1/sensors/1/readings?resolution=raw
+Authorization: Bearer {{tKalite}}
+
+### Lokasyonun tüm sensörleri, 7 gün (15m)
+GET {{api}}/api/v1/locations/41/readings?from=2026-10-17T00:00:00Z
+Authorization: Bearer {{tKalite}}
+
+### Sensör sağlığı (pil / bağlantı)
+GET {{api}}/api/v1/sensors/health
+Authorization: Bearer {{tKalite}}
+
+### Partisyonlar, özet seviyeleri, saklama
+GET {{api}}/api/v1/timeseries/stats
+Authorization: Bearer {{tKalite}}
+
+### İmzasız cihaz mesajı → 401 (imzalı gönderim için simülatöre veya load/k6.js'e bakın)
+POST {{api}}/api/v1/ingest/readings
+Content-Type: {{json}}
+X-Device-Id: S-00001
+
+{"readings": [{"ts": "2026-10-24T10:00:00Z", "temp_cc": 410, "humidity_pm": 820}]}
+
+###############################################################################
+# F-4 Alarm ve uygunsuzluk
+###############################################################################
+
+### Canlı alarmlar
+GET {{api}}/api/v1/alarms?status=live&limit=20
+Authorization: Bearer {{tKalite}}
+
+### Onayla / kapat
+POST {{api}}/api/v1/alarms/1/ack
+Authorization: Bearer {{tKalite}}
+
+###
+POST {{api}}/api/v1/alarms/1/close
+Authorization: Bearer {{tKalite}}
+
+### Uygunsuzluklar
+GET {{api}}/api/v1/nonconformities
+Authorization: Bearer {{tKalite}}
+
+### Uygunsuzluk aç (parti beklemeye alınır)
+POST {{api}}/api/v1/nonconformities
+Authorization: Bearer {{tKalite}}
+Content-Type: {{json}}
+
+{"lot_id": 2, "description": "Ambalajda yoğuşma"}
+
+###############################################################################
+# T-1 / F-5 Sapma değerlendirmesi ve kalite kararı
+###############################################################################
+
+### Parti değerlendirmesi: kümülatif, pencere, boşluk, MKT, kalan raf ömrü
+GET {{api}}/api/v1/lots/2/evaluation
+Authorization: Bearer {{tKalite}}
+
+### Boşluk politikası karşılaştırması (aynı veri)
+GET {{api}}/api/v1/sensors/1/evaluation?product_id=1&policy=uncertain
+Authorization: Bearer {{tKalite}}
+
+###
+GET {{api}}/api/v1/sensors/1/evaluation?product_id=1&policy=interpolate
+Authorization: Bearer {{tKalite}}
+
+### Kalite kararı
+POST {{api}}/api/v1/lots/2/decisions
+Authorization: Bearer {{tKalite}}
+Content-Type: {{json}}
+Idempotency-Key: demo-decision-0002
+
+{"decision": "discount", "discount_pct": 20, "reason": "45 dk 9 °C üzerinde kaldı, duyusal kontrol uygun"}
+
+### Kararlar
+GET {{api}}/api/v1/lots/2/decisions
+Authorization: Bearer {{tKalite}}
+
+###############################################################################
+# T-5 Sapma raporları (hash zinciri)
+###############################################################################
+
+POST {{api}}/api/v1/lots/2/excursion-reports
+Authorization: Bearer {{tKalite}}
+
+###
+GET {{api}}/api/v1/excursion-reports
+Authorization: Bearer {{tDenetci}}
+
+###
+GET {{api}}/api/v1/excursion-reports/1
+Authorization: Bearer {{tDenetci}}
+
+### Zinciri doğrula
+GET {{api}}/api/v1/excursion-reports/verify
+Authorization: Bearer {{tDenetci}}
+
+###############################################################################
+# F-6 HACCP
+###############################################################################
+
+GET {{api}}/api/v1/haccp/checklists
+Authorization: Bearer {{tDepo}}
+
+###
+GET {{api}}/api/v1/haccp/records?limit=10
+Authorization: Bearer {{tDepo}}
+
+### Kayıt (madde id'leri listeden; başarısız maddede corrective_action zorunlu)
+POST {{api}}/api/v1/haccp/records
+Authorization: Bearer {{tDepo}}
+Content-Type: {{json}}
+
+{"checklist_id": 1, "location_id": 41, "answers": [
+  {"item_id": 1, "temp_cc": 410},
+  {"item_id": 2, "bool_value": false, "corrective_action": "Conta değiştirildi"},
+  {"item_id": 3, "bool_value": true},
+  {"item_id": 4, "bool_value": true}
+]}
+
+###############################################################################
+# F-3 / T-4 Sevkiyat, FEFO planı, yükleme
+###############################################################################
+
+GET {{api}}/api/v1/shipments?status=planned
+Authorization: Bearer {{tOps}}
+
+###
+POST {{api}}/api/v1/shipments
+Authorization: Bearer {{tOps}}
+Content-Type: {{json}}
+Idempotency-Key: demo-shipment-0001
+
+{"vehicle_id": 15, "customer_id": 3, "origin_id": 41, "planned_departure": "2026-10-24T15:00:00Z", "transit_minutes": 180}
+
+### Seed'deki ilk planlı sevkiyat (127): LOT-FEFO-1 elenir, diğerleri SKT sırasıyla seçilir
+GET {{api}}/api/v1/shipments/127
+Authorization: Bearer {{tOps}}
+
+### FEFO + kapasite planı (değiştirmez)
+POST {{api}}/api/v1/shipments/127/plan
+Authorization: Bearer {{tOps}}
+Content-Type: {{json}}
+
+{"lines": [{"product_id": 12, "quantity": 2000}], "safety_margin_hours": 24}
+
+### Yükle (kilitli; kapasite + parti durumu + raf ömrü yeniden kontrol edilir)
+# unit_ids: plan yanıtındaki "selected" listesinden
+POST {{api}}/api/v1/shipments/127/load
+Authorization: Bearer {{tOps}}
+Content-Type: {{json}}
+
+{"unit_ids": [0]}
+
+### Yola çıkar
+POST {{api}}/api/v1/shipments/127/depart
+Authorization: Bearer {{tOps}}
+
+###############################################################################
+# T-5 Şoför (çevrimdışı senkron)
+###############################################################################
+
+GET {{api}}/api/v1/driver/shipments
+Authorization: Bearer {{tSofor}}
+
+### Aynı gövdeyi iki kez gönderin: ikincisinde "already_synced" (124: seed'de sofor'un yoldaki sevkiyatı)
+POST {{api}}/api/v1/driver/sync
+Authorization: Bearer {{tSofor}}
+Content-Type: {{json}}
+
+{"events": [
+  {"client_event_id": "6f1d9a52-0000-4000-8000-000000000001", "shipment_id": 124, "kind": "temperature_check", "recorded_at": "2026-10-24T13:00:00Z", "temp_cc": 420},
+  {"client_event_id": "6f1d9a52-0000-4000-8000-000000000002", "shipment_id": 124, "kind": "delivery", "recorded_at": "2026-10-24T13:05:00Z", "receiver_name": "Mağaza müdürü"}
+]}
+
+###############################################################################
+# F-7 / T-3 İzlenebilirlik ve geri çağırma
+###############################################################################
+
+### Parti ileri izi (query_ms)
+GET {{api}}/api/v1/trace/lots/301
+Authorization: Bearer {{tKalite}}
+
+### Palet geriye izi (atalar, lokasyonlar, sıcaklık) — 1: LOT-TRACE paletleri arasında değil; M-TRACE-01'i /units?q=M-TRACE ile bulun
+GET {{api}}/api/v1/trace/units/1
+Authorization: Bearer {{tKalite}}
+
+### Geri çağırma
+POST {{api}}/api/v1/recalls
+Authorization: Bearer {{tKalite}}
+Content-Type: {{json}}
+Idempotency-Key: demo-recall-0001
+
+{"lot_id": 302, "reason": "Tedarikçi bildirimi: ambalaj kontaminasyonu"}
+
+###
+GET {{api}}/api/v1/recalls
+Authorization: Bearer {{tKalite}}
+
+###
+GET {{api}}/api/v1/recalls/1
+Authorization: Bearer {{tKalite}}
+
+###############################################################################
+# Müşteri ve denetçi
+###############################################################################
+
+GET {{api}}/api/v1/customer/shipments
+Authorization: Bearer {{tMarket}}
+
+### Sıcaklık sertifikası (kendi sevkiyatı)
+GET {{api}}/api/v1/customer/shipments/124
+Authorization: Bearer {{tMarket}}
+
+### Başka marketin sevkiyatı → 404
+GET {{api}}/api/v1/customer/shipments/125
+Authorization: Bearer {{tMarket}}
+
+### Denetim kaydı
+GET {{api}}/api/v1/audit?entity=lot&limit=20
+Authorization: Bearer {{tDenetci}}
