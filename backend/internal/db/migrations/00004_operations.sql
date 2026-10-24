@@ -27,14 +27,17 @@ CREATE TABLE shipment_items (
     PRIMARY KEY (shipment_id, unit_id)
 );
 
-CREATE TYPE alarm_rule AS ENUM ('limit_high', 'limit_low', 'cumulative', 'window', 'gap');
+CREATE TYPE alarm_rule AS ENUM ('limit_high', 'limit_low', 'cumulative', 'window', 'gap', 'shelf_life');
 CREATE TYPE alarm_status AS ENUM ('open', 'acknowledged', 'closed');
 
 CREATE TABLE alarms (
     id                bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     dedup_key         text         NOT NULL,
-    sensor_id         int          NOT NULL REFERENCES sensors (id),
-    location_id       bigint       NOT NULL REFERENCES locations (id),
+    -- sensor alarms come from the live evaluator, lot alarms (cumulative
+    -- excursion, shelf life) from the lot evaluator
+    sensor_id         int REFERENCES sensors (id),
+    location_id       bigint REFERENCES locations (id),
+    lot_id            bigint REFERENCES lots (id),
     product_id        bigint REFERENCES products (id),
     rule              alarm_rule   NOT NULL,
     status            alarm_status NOT NULL DEFAULT 'open',
@@ -48,12 +51,14 @@ CREATE TABLE alarms (
     acknowledged_at   timestamptz,
     acknowledged_by   bigint REFERENCES users (id),
     closed_at         timestamptz,
+    CONSTRAINT alarms_subject CHECK (sensor_id IS NOT NULL OR lot_id IS NOT NULL),
     CONSTRAINT alarms_ack CHECK ((status = 'open') OR acknowledged_at IS NOT NULL OR closed_at IS NOT NULL)
 );
 -- one live alarm per condition: the evaluator upserts against this
 CREATE UNIQUE INDEX alarms_dedup_live_uq ON alarms (dedup_key) WHERE status <> 'closed';
 CREATE INDEX alarms_status_idx ON alarms (status, id DESC);
 CREATE INDEX alarms_location_idx ON alarms (location_id, opened_at);
+CREATE INDEX alarms_lot_idx ON alarms (lot_id) WHERE lot_id IS NOT NULL;
 
 CREATE TABLE nonconformities (
     id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
